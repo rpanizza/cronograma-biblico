@@ -93,19 +93,27 @@ events_df = pd.DataFrame(data)
 
 def show_dashboard(events):
     
-    st.title("📜 Cronograma Profético Bíblico")
+    # --------------------------------------------------------
+    # NOVO LAYOUT DO TOPO: Login (Esquerda) | Título | Compartilhar (Direita)
+    # Colunas: Login (2) | Título (7) | Espaçador (1) | Compartilhar (1)
+    col_login, col_title, col_spacer, col_share = st.columns([2, 7, 1, 1]) 
 
-    # Layout dos Botões no Canto Superior Direito (usando colunas)
-    col_spacer, col_login, col_share = st.columns([12, 1.5, 1]) 
-    
     with col_login:
-        if st.button("🔑 Login", key='login_button'):
+        # Botão de Login no canto superior esquerdo
+        if st.button("🔑 Login", key='top_login_button'):
             st.session_state.page = 'login' 
             st.experimental_rerun()
             
+    with col_title:
+        # Título Centralizado
+        st.markdown(f"<h1 style='text-align: center; margin-top: 0;'>📜 Cronograma Profético Bíblico</h1>", unsafe_allow_html=True)
+        
     with col_share:
-        if st.button("🔗", key='share_button'):
+        # Botão de Compartilhar no canto superior direito
+        if st.button("🔗", key='top_share_button'):
             st.toast("Link de compartilhamento copiado para a área de transferência! (Simulado)")
+    
+    # --------------------------------------------------------
             
     st.markdown("---") # Separador
     
@@ -116,7 +124,6 @@ def show_dashboard(events):
     
     # Renderiza os eventos
     for index, event in events.iterrows():
-        # INÍCIO DA CORREÇÃO: Envolvendo a atribuição em parênteses
         html_item = (
             f"""
             <div class="timeline-item">
@@ -128,7 +135,6 @@ def show_dashboard(events):
             </div>
             """
         )
-        # FIM DA CORREÇÃO
         st.markdown(html_item, unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -142,4 +148,50 @@ def show_login():
     with st.form("login_form"):
         username = st.text_input("Usuário")
         password = st.text_input("Senha", type="password")
-        submitted = st.form_submit_button
+        submitted = st.form_submit_button("Entrar")
+        
+        if submitted:
+            # Lógica de Autenticação Trivial (APENAS PARA TESTE)
+            if username == "admin" and password == "123":
+                st.session_state.logged_in = True
+                st.session_state.page = 'admin'
+                st.success("Login bem-sucedido! Redirecionando...")
+                st.experimental_rerun()
+            else:
+                st.error("Usuário ou senha inválidos.")
+    
+    if st.button("Voltar para Dashboard"):
+        st.session_state.page = 'dashboard'
+        st.experimental_rerun()
+
+# --- 5. Função do Painel Admin (Placeholder) ---
+
+def show_admin_panel():
+    st.title("⚙️ Painel de Administração")
+    st.write("A área de Edição e Adição/Exclusão de conteúdo será desenvolvida aqui.")
+    st.warning("No momento, os dados são fixos e este painel é um placeholder.")
+    
+    if st.button("Logout"):
+        if 'logged_in' in st.session_state:
+            del st.session_state.logged_in
+        st.session_state.page = 'dashboard'
+        st.experimental_rerun()
+
+
+# --- 6. Controle de Páginas (Roteamento Principal) ---
+
+# Inicializa o estado da sessão (se não existir)
+if 'page' not in st.session_state:
+    st.session_state.page = 'dashboard'
+
+# Roteamento baseado no estado
+if st.session_state.page == 'dashboard':
+    show_dashboard(events_df)
+elif st.session_state.page == 'login':
+    show_login()
+elif st.session_state.page == 'admin' and st.session_state.get('logged_in'):
+    show_admin_panel()
+else:
+    # Garante o retorno ao dashboard se o estado for inválido
+    st.session_state.page = 'dashboard'
+    st.experimental_rerun()
