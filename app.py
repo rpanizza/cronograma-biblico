@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import hashlib 
 
 # --- CONFIGURAÇÃO DA PÁGINA E CSS CUSTOMIZADO ---
 
@@ -46,6 +47,15 @@ def timeline_css():
             font-size: 1.25em; 
             font-weight: bold;
         }
+        /* NOVO ESTILO: Ajuste do expander para ser discreto (apenas seta) */
+        /* Isso oculta o texto padrão do Expander e foca apenas no ícone da seta */
+        .streamlit-expanderHeader {
+            padding: 0;
+            padding-left: 10px;
+            margin-bottom: -10px;
+            font-size: 1.1em;
+            color: #6c757d;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -54,7 +64,7 @@ timeline_css()
 # Chave de acesso administrativa
 ADMIN_PASSWORD = "R$Masterkey01" 
 
-# --- NOVO MODELO DE DADOS: LISTA DE SEÇÕES, CADA UMA COM LISTA DE EVENTOS E CADA EVENTO COM LISTA DE FATOS ---
+# --- MODELO DE DADOS ---
 
 DADOS_INICIAIS = [
     {
@@ -155,7 +165,16 @@ def exibir_fato(fato):
     st.markdown("---") # Separador entre fatos
 
 def exibir_evento(evento, show_line=True):
-    """Renderiza o título do evento e o Expander de Detalhes na mesma linha."""
+    """Renderiza o título do evento e o Expander de Detalhes na mesma linha, agora com chave única e label de seta."""
+    
+    # ----------------------------------------------------
+    # CHAVE ÚNICA DETERMINÍSTICA PARA EVITAR CONFLITOS (CRUCIAL)
+    # ----------------------------------------------------
+    # Cria uma string única a partir do conteúdo do evento
+    unique_str = f"{evento['data_principal']}-{evento['titulo_evento']}"
+    # Gera um hash para ser a chave Streamlit
+    expander_key = f"pub_exp_{hashlib.sha1(unique_str.encode('utf-8')).hexdigest()}"
+    # ----------------------------------------------------
     
     # 1. Colunas para alinhar visualmente: Ponto/Linha, Título/Data, e Expander/Botão
     col_dot, col_title, col_expand = st.columns([0.05, 0.70, 0.25])
@@ -170,8 +189,11 @@ def exibir_evento(evento, show_line=True):
         st.markdown(f'<p class="event-title">{evento["data_principal"]} | {evento["titulo_evento"]}</p>', unsafe_allow_html=True)
     
     with col_expand:
-        # Expander de Detalhes no final da linha do evento
-        with st.expander("Detalhes (Fatos, Profecias, Análises)"):
+        # Expander de Detalhes com rótulo mínimo (seta) e a chave única
+        # A tag "▶️" funciona como label, e o CSS customizado garante que ele fique discreto.
+        with st.expander(label="▶️", expanded=False, key=expander_key):
+            st.subheader("Fatos, Profecias e Análises Correlacionadas") # Título dentro do expander
+            
             if st.session_state.logged_in:
                 st.info("Logado: Você pode adicionar novos fatos aqui.")
                 
@@ -181,7 +203,7 @@ def exibir_evento(evento, show_line=True):
             # Botão para o administrador adicionar novos fatos
             if st.session_state.logged_in:
                 # O administrador adiciona o fato pelo formulário na Área Admin
-                st.markdown(f"**Atenção Admin:** Use a aba 'Adicionar Fato' na Área Administrativa para adicionar novos itens ao evento **'{evento['titulo_evento']}'**.")
+                st.markdown(f"**Atenção Admin:** Use a aba 'Adicionar Fato/Evento' na Área Administrativa para adicionar novos itens ao evento **'{evento['titulo_evento']}'**.")
 
 
 def exibir_marcador_hoje():
@@ -198,7 +220,7 @@ def exibir_marcador_hoje():
 
 
 def exibir_cronograma():
-    """Renderiza o cronograma completo, sem expander global."""
+    """Renderiza o cronograma completo."""
     st.title("📜 Cronograma Profético Bíblico")
     st.markdown("Uma timeline organizada por eventos principais, profecias e análises correlacionadas.")
     st.divider()
@@ -228,7 +250,7 @@ def exibir_cronograma():
 
     # Caso não haja seções futuras, insere HOJE no final
     if not hoje_inserido:
-         exibir_marcador_hoje()
+          exibir_marcador_hoje()
 
 
 # --- ÁREA ADMINISTRATIVA ---
@@ -304,22 +326,23 @@ def admin_page():
                                 found = True
                                 break
                         if found: break
-                    
+                        
                     if found:
                         st.success(f"Novo Fato adicionado com sucesso ao evento: '{evento['titulo_evento']}'!")
+                        st.rerun() 
                     else:
                         st.error("Erro ao encontrar o evento pai.")
                 else:
                     st.error("Preencha o Profeta/Fonte e ao menos a Escritura ou a Análise.")
             elif submit_button:
-                 st.error("Selecione um Evento Pai.")
+                    st.error("Selecione um Evento Pai.")
 
     with tab2:
         st.subheader("Gerenciar a Estrutura (Seções e Eventos Principais)")
         st.info("Aqui você visualiza a estrutura de dados complexa. Para edição completa, o método mais fácil é converter para JSON, editar e carregar novamente, ou usar um banco de dados persistente.")
         
         # Exibe a estrutura completa como JSON (apenas para visualização de Admin)
-        st.json(st.session_state.cronograma)
+        st.json(st.session_state.cronograma, expanded=False)
         
     with tab3:
         st.subheader("Ambiente de Estudo com I.A. (Gemini)")
