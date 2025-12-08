@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Painel de Controle Centralizado e Edição/Exclusão de Títulos
-VERSAO_APP = "1.9.0" 
+# Versão do Aplicativo (App) - Correção do TypeError no st.expander do Painel de Controle
+VERSAO_APP = "1.9.1" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.19" 
+VERSAO_CONTEUDO = "25.1208.20" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -26,12 +26,13 @@ SENHA_CORRETA = "R$Masterkey01" # Senha de Admin
 
 def get_sort_key(date_str):
     """Converte a data (ex: '539 a.C.') em um número para ordenação."""
-    date_str_clean = date_str.lower().replace('.', '').strip()
+    # Garante que mesmo eventos sem data explícita (como Títulos/Capítulos) tenham um ponto de ordenação
+    date_str_clean = str(date_str).lower().replace('.', '').strip()
     match = re.match(r'(\d+)\s*(a\.c\.|ac|d\.c\.|dc)?', date_str_clean)
     if not match: 
         if "futuro" in date_str_clean or "tribulação" in date_str_clean:
             return 999999 
-        return 0 
+        return 0 # Valor neutro para itens sem data
     
     try: 
         year = int(match.group(1))
@@ -139,6 +140,7 @@ def run_ia_search(prompt):
         st.session_state['ia_response_text'] = None
         st.session_state['ia_raw_result'] = ""
         st.session_state['show_ia_preview'] = False 
+        st.rerun()
         return
         
     # Limpa estados de visualização antes de pesquisar
@@ -175,12 +177,12 @@ if 'confirm_exit' not in st.session_state: st.session_state['confirm_exit'] = Fa
 if 'status_message' not in st.session_state: st.session_state['status_message'] = None
 if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
 
-# Estados da IA
+# Estados da IA e Controle
 if 'ia_prompt_area' not in st.session_state: st.session_state['ia_prompt_area'] = ""
 if 'ia_response_text' not in st.session_state: st.session_state['ia_response_text'] = None # Resultado da IA (Formatado)
 if 'ia_raw_result' not in st.session_state: st.session_state['ia_raw_result'] = "" # Resultado Bruto
 if 'show_ia_preview' not in st.session_state: st.session_state['show_ia_preview'] = False # Controle da Prévia
-
+if 'control_panel_expanded' not in st.session_state: st.session_state['control_panel_expanded'] = False # Estado inicial do Painel
 
 st.markdown("""
 <style>
@@ -368,7 +370,7 @@ with st.sidebar:
 
 def is_historical_analysis(data_str):
     """Determina se a análise deve ser Histórica ou Hipotética com base na data."""
-    data_str_lower = data_str.lower()
+    data_str_lower = str(data_str).lower()
     if "futuro" in data_str_lower or "tribulação" in data_str_lower or not any(char.isdigit() for char in data_str):
         return False
     return True 
@@ -430,6 +432,7 @@ def render_preview_tree(events_list, events_by_parent):
     
     def render_recursive(events, parent_id):
         if parent_id in events:
+            # Ordena os eventos filhos
             sorted_events = sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False)
             
             st.markdown("<div class='timeline-container'>", unsafe_allow_html=True)
@@ -446,8 +449,8 @@ def render_preview_tree(events_list, events_by_parent):
         st.info("O cronograma está vazio. Faça login e use o Painel de Controle para adicionar eventos.")
         return
         
-    # 1. Itera sobre os Títulos Principais (parent_id=None)
-    for principal_event in events_by_parent.get(None, []):
+    # 1. Itera sobre os Títulos Principais (parent_id=None) e os ordena
+    for principal_event in sorted(events_by_parent.get(None, []), key=lambda x: get_sort_key(x['data']), reverse=False):
         
         display_event_preview(principal_event, is_sub_event=False)
         
@@ -470,18 +473,19 @@ def display_event_control(item, admin_mode=False):
         st.markdown(f"<div class='panel-chapter-title'>[CAPÍTULO] {item['evento']}</div>", unsafe_allow_html=True)
     else:
         # Usa o 'data' no título do card no painel para facilitar identificação
-        st.markdown(f"**{item['data']}** - {item['evento']}")
+        st.markdown(f"**{item.get('data', 'S/Data')}** - {item['evento']}")
         
     st.caption(f"ID: {item['id'][:8]}...")
     
     col_edit, col_delete = st.columns([1, 1])
     
+    # Botão Editar
     if col_edit.button("✏️ Editar", key=f"edit_panel_{item['id']}"):
         for i, evt in enumerate(lista_eventos):
             if evt['id'] == item['id']:
                 st.session_state.edit_index = i
                 break
-        # Força a expansão do Painel e do Formulário de Edição
+        # Força a expansão do Painel para o formulário aparecer
         st.session_state['control_panel_expanded'] = True
         st.rerun()
 
@@ -548,19 +552,17 @@ if admin_mode:
             eventos_por_parent[parent_id] = []
         eventos_por_parent[parent_id].append(item)
     
-    # Ordena todos os eventos
-    todos_eventos_ordenados = sorted(lista_eventos, key=lambda x: (x.get('parent_id') or x['id'], get_sort_key(x['data'])), reverse=False)
-
-    
-    # Determina se o painel deve estar expandido
+    # Determina se o painel deve estar expandido.
+    # Se estiver editando ou adicionando, o painel deve estar expandido.
     is_editing = st.session_state.edit_index is not None
     
-    # Se estiver editando, expande o painel automaticamente. Caso contrário, usa o estado anterior.
+    # Se estiver editando, expande o painel automaticamente. Caso contrário, usa o estado persistido.
     control_panel_expanded = is_editing or st.session_state.get('control_panel_expanded', False)
 
+    # CORREÇÃO DO TYPERROR: Não salvar o estado imediatamente após criar
     with st.expander("🛠️ Painel de Controle (Edição Completa)", expanded=control_panel_expanded, key='control_panel_expander'):
         
-        # Salva o estado expandido/contraído
+        # ATUALIZA o estado do expander APÓS a renderização
         st.session_state['control_panel_expanded'] = st.session_state.control_panel_expander
         
         st.header("1. Ferramentas da IA e Prévia")
@@ -672,7 +674,7 @@ if admin_mode:
         form_titulo = f"✏️ Editando: {item_editado['evento']}" if item_editado else "✍️ Adicionar Novo Evento (Manual)"
         
         # 1. Recupera valores (apenas para edição)
-        data_padrao = item_editado['data'] if item_editado else ''
+        data_padrao = item_editado.get('data', '') if item_editado else ''
         evento_padrao = item_editado['evento'] if item_editado else ''
         profeta_padrao = item_editado.get('profeta_data', '') if item_editado else ''
         hist_padrao = item_editado['historico'] if item_editado else ''
@@ -687,7 +689,8 @@ if admin_mode:
         ]
         for event in lista_eventos:
             if not item_editado or event['id'] != item_editado.get('id'):
-                eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
+                # Incluir apenas eventos que não são o próprio item que está sendo editado
+                eventos_principais_options.append({"evento": f"{event.get('data', 'S/Data')} - {event['evento']}", "id": event['id']})
 
         parent_default_index = 0
         if parent_id_padrao:
@@ -715,7 +718,6 @@ if admin_mode:
 
                 col_input1, col_input2 = st.columns([1, 2])
                 with col_input1:
-                    # Títulos Principais não precisam de data, mas a IA sempre fornece, então permitimos vazio
                     data_final = st.text_input("Data (Ex: 959 a.C. ou Futuro)", key="in_data_final_m_panel", value=data_padrao)
                 with col_input2:
                     evento_final = st.text_input("Título Final do Evento (Com Emoji)", value=evento_padrao, key="final_evento_m_panel")
@@ -766,7 +768,7 @@ if admin_mode:
         # O botão para adicionar novo evento força o formulário a aparecer (limpando o modo edição)
         if st.session_state.edit_index is None:
             if st.button("➕ Adicionar Novo Evento/Título Manualmente"):
-                st.session_state.edit_index = None
+                st.session_state.edit_index = None # Limpa qualquer edição pendente
                 st.session_state['control_panel_expanded'] = True
                 st.rerun()
 
@@ -777,25 +779,25 @@ if admin_mode:
         st.write("Clique em 'Editar' para abrir o formulário acima.")
         
         # Itera sobre os Títulos Principais (parent_id=None) e seus filhos
-        for principal_event in eventos_por_parent.get(None, []):
+        
+        # 1. Títulos Principais (Ordenados)
+        for principal_event in sorted(eventos_por_parent.get(None, []), key=lambda x: get_sort_key(x['data']), reverse=False):
             
-            # 1. Título Principal
             display_event_control(principal_event, admin_mode=admin_mode)
             
             # 2. Eventos Filhos em um bloco indentado
             if principal_event['id'] in eventos_por_parent:
                 
-                # Renderiza os filhos
+                # Renderiza os filhos (Ordenados)
                 sorted_children = sorted(eventos_por_parent[principal_event['id']], key=lambda x: get_sort_key(x['data']), reverse=False)
                 
                 with st.expander(f"Conteúdo de: {principal_event['evento']}", expanded=False):
                     for child in sorted_children:
                         display_event_control(child, admin_mode=admin_mode)
                         
-                        # Se houver sub-níveis (filho de um filho), não exibiremos a recursão aqui
-                        # para manter a interface de controle mais simples e plana.
+                        # Se houver sub-níveis (filho de um filho)
                         if child['id'] in eventos_por_parent:
-                             st.caption(f"⚠️ O evento '{child['evento']}' tem subeventos (nível 3). Edite-os separadamente.")
+                             st.caption(f"⚠️ O evento '{child['evento']}' tem subeventos (nível 3) que não estão visíveis aqui. Eles aparecerão no Painel como itens de nível 2 quando seu pai for excluído.")
         
         st.markdown("---")
 
