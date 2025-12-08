@@ -2,14 +2,13 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import os
-from datetime import datetime
 
 # --- CONFIGURAÇÃO INICIAL ---
 st.set_page_config(page_title="Cronograma Dinâmico", layout="centered")
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
-VERSAO_ATUAL = "25.1207.1"
+VERSAO_ATUAL = "25.1207.2"
 
 # Tenta pegar a chave API dos Segredos do Streamlit
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
@@ -28,7 +27,7 @@ def carregar_dados():
     with open(ARQUIVO_DADOS, 'r', encoding='utf-8') as f:
         try:
             conteudo = json.load(f)
-            # Migração: Se o arquivo antigo era apenas uma lista (versão anterior), converte para o novo formato
+            # Migração: Se o arquivo antigo era apenas uma lista, converte para o novo formato
             if isinstance(conteudo, list):
                 return {"titulo": "📜 Cronograma Profético Dinâmico", "eventos": conteudo}
             return conteudo
@@ -150,8 +149,8 @@ if admin_mode:
                     "escritura": txt_biblico
                 }
                 lista_eventos.append(novo_item)
-                dados_app["eventos"] = lista_eventos # Atualiza a lista no objeto principal
-                salvar_dados(dados_app) # Salva tudo (título + eventos)
+                dados_app["eventos"] = lista_eventos # Atualiza a lista
+                salvar_dados(dados_app) # Salva tudo
                 st.success("Evento salvo!")
                 st.session_state['temp_hist'] = ""
                 st.session_state['temp_bib'] = ""
@@ -167,4 +166,12 @@ else:
         titulo_card = f"🗓️ **{item['data']}** — {item['evento']}"
         
         with st.expander(titulo_card):
-            st.markdown(f"**Contexto Histórico:**
+            # Correção aplicada aqui: Usando aspas triplas para segurança
+            st.markdown(f"""
+            **Contexto Histórico:**
+            {item['historico']}
+            """)
+            
+            st.markdown("---")
+            st.markdown("**📖 Escrituras:**")
+            st.info(item['
