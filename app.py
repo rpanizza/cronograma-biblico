@@ -2,26 +2,38 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import os
+from datetime import datetime
 
 # --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="Cronograma das Escrituras", layout="centered")
+st.set_page_config(page_title="Cronograma Dinâmico", layout="centered")
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
+VERSAO_ATUAL = "25.1207.1"
 
-# Tenta pegar a chave API dos "Segredos" do Streamlit (para quando estiver online)
-# Ou usa uma string vazia se estiver rodando local sem configurar ainda
-API_KEY = st.secrets.get("GEMINI_API_KEY", "") 
+# Tenta pegar a chave API dos Segredos do Streamlit
+API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
-# --- FUNÇÕES DE BANCO DE DADOS (SIMPLES) ---
+# --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_dados():
+    # Estrutura padrão caso o arquivo não exista
+    dados_padrao = {
+        "titulo": "📜 Cronograma Profético Dinâmico",
+        "eventos": []
+    }
+    
     if not os.path.exists(ARQUIVO_DADOS):
-        return []
+        return dados_padrao
+        
     with open(ARQUIVO_DADOS, 'r', encoding='utf-8') as f:
         try:
-            return json.load(f)
+            conteudo = json.load(f)
+            # Migração: Se o arquivo antigo era apenas uma lista (versão anterior), converte para o novo formato
+            if isinstance(conteudo, list):
+                return {"titulo": "📜 Cronograma Profético Dinâmico", "eventos": conteudo}
+            return conteudo
         except json.JSONDecodeError:
-            return []
+            return dados_padrao
 
 def salvar_dados(dados):
     with open(ARQUIVO_DADOS, 'w', encoding='utf-8') as f:
@@ -34,10 +46,8 @@ def consultar_gemini(topico):
     
     try:
         genai.configure(api_key=API_KEY)
-        # Usando modelo flash para resposta rápida e econômica
         model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # PROMPT ESTRITO CONFORME SUA REGRA
         prompt = f"""
         Você é um assistente estrito de cronologia bíblica.
         Tópico solicitado: "{topico}"
@@ -67,68 +77,72 @@ def consultar_gemini(topico):
     except Exception as e:
         return f"Erro de conexão: {str(e)}", ""
 
+# --- CARREGA DADOS ---
+dados_app = carregar_dados()
+lista_eventos = dados_app["eventos"]
+titulo_atual = dados_app.get("titulo", "Cronograma Profético")
+
 # --- INTERFACE DO USUÁRIO ---
 
-st.title("📜 Cronograma Profético Dinâmico")
+# Exibe o título editável
+st.title(titulo_atual)
 st.markdown("Amplie os itens abaixo para ver os fatos históricos e as escrituras.")
 
-# --- BARRA LATERAL (LOGIN) ---
+# --- BARRA LATERAL (LOGIN E CONFIGURAÇÕES) ---
 with st.sidebar:
-    st.header("Área do Editor")
+    st.header("⚙️ Área do Editor")
     senha_input = st.text_input("Senha de Acesso", type="password")
     
-    # DEFINE SUA SENHA AQUI (Simples)
+    # SENHA (Alterar conforme necessidade)
     SENHA_CORRETA = "1234" 
     admin_mode = (senha_input == SENHA_CORRETA)
     
     if admin_mode:
         st.success("✅ Modo Edição Ativo")
+        st.divider()
+        
+        # --- EDITOR DE TÍTULO ---
+        st.subheader("Personalizar")
+        novo_titulo = st.text_input("Título do Projeto", value=titulo_atual)
+        if novo_titulo != titulo_atual:
+            dados_app["titulo"] = novo_titulo
+            salvar_dados(dados_app)
+            st.rerun() # Recarrega a página para atualizar o título
+            
     elif senha_input:
         st.error("Senha incorreta")
         
     st.divider()
-    st.caption("Versão do Sistema: 25.1206.3")
+    st.caption(f"Versão do Sistema: {VERSAO_ATUAL}")
 
-# Carrega os dados existentes
-lista_eventos = carregar_dados()
-
-# --- ÁREA DE CRIAÇÃO (SÓ APARECE SE TIVER A SENHA) ---
+# --- ÁREA DE CRIAÇÃO (ADMIN) ---
 if admin_mode:
-    with st.expander("➕ Adicionar Novo Evento (Clique Aqui)", expanded=True):
+    with st.expander("➕ Adicionar Novo Evento", expanded=False):
         st.write("Preencha o tópico e use a IA para buscar o texto fiel.")
         
-        # Passo 1: Definir o tópico para pesquisa
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
             data_temp = st.text_input("Data (ex: 539 a.C.)", key="in_data")
         with col_input2:
             evento_temp = st.text_input("Nome do Evento", key="in_evento")
             
-        # Botão para chamar o Gemini
-        if st.button("✨ Pesquisar Texto Fiel com Gemini"):
+        if st.button("✨ Pesquisar com IA"):
             if evento_temp:
                 with st.spinner("Consultando escrituras..."):
                     hist_ia, bib_ia = consultar_gemini(evento_temp)
-                    # Salva no estado temporário para preencher o formulário abaixo
                     st.session_state['temp_hist'] = hist_ia
                     st.session_state['temp_bib'] = bib_ia
             else:
                 st.warning("Digite o nome do evento primeiro.")
 
-        # Passo 2: Formulário final de salvamento
         with st.form("form_salvar"):
-            st.markdown("### Revisar e Salvar")
-            # Usa os valores trazidos pela IA (ou vazio se não tiver ainda)
             val_hist = st.session_state.get('temp_hist', "")
             val_bib = st.session_state.get('temp_bib', "")
             
-            # Campos de texto editáveis
             txt_historico = st.text_area("Fato Histórico", value=val_hist, height=100)
             txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=150)
             
-            submit = st.form_submit_button("💾 Salvar no Cronograma")
-            
-            if submit:
+            if st.form_submit_button("💾 Salvar no Cronograma"):
                 novo_item = {
                     "data": data_temp,
                     "evento": evento_temp,
@@ -136,9 +150,9 @@ if admin_mode:
                     "escritura": txt_biblico
                 }
                 lista_eventos.append(novo_item)
-                salvar_dados(lista_eventos)
-                st.success(f"Evento '{evento_temp}' salvo!")
-                # Limpa os campos da IA
+                dados_app["eventos"] = lista_eventos # Atualiza a lista no objeto principal
+                salvar_dados(dados_app) # Salva tudo (título + eventos)
+                st.success("Evento salvo!")
                 st.session_state['temp_hist'] = ""
                 st.session_state['temp_bib'] = ""
                 st.rerun()
@@ -147,24 +161,10 @@ if admin_mode:
 st.divider()
 
 if not lista_eventos:
-    st.info("O cronograma está vazio. Faça login para adicionar o primeiro evento.")
+    st.info("O cronograma está vazio. Faça login para começar.")
 else:
-    # Exibe os itens (pode-se adicionar lógica de ordenação aqui se quiser)
     for i, item in enumerate(lista_eventos):
-        # O cabeçalho do acordeão
-        titulo = f"🗓️ **{item['data']}** — {item['evento']}"
+        titulo_card = f"🗓️ **{item['data']}** — {item['evento']}"
         
-        with st.expander(titulo):
-            # Conteúdo interno (Expandido)
-            st.markdown(f"**Contexto Histórico:**\n{item['historico']}")
-            st.markdown("---")
-            st.markdown(f"**📖 Escrituras:**")
-            # Caixa de destaque para a escritura
-            st.info(item['escritura'])
-            
-            # Botão de excluir (Só para admin)
-            if admin_mode:
-                if st.button("🗑️ Excluir este item", key=f"del_{i}"):
-                    lista_eventos.pop(i)
-                    salvar_dados(lista_eventos)
-                    st.rerun()
+        with st.expander(titulo_card):
+            st.markdown(f"**Contexto Histórico:**
