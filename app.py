@@ -3,19 +3,37 @@ import google.generativeai as genai
 import json
 import os
 
-# --- CONFIGURAÇÃO INICIAL ---
-st.set_page_config(page_title="Cronograma Dinâmico", layout="centered")
+# --- CONFIGURAÇÃO INICIAL (RESPONSIVIDADE) ---
+# layout="centered" é melhor para leitura em celulares do que "wide"
+# initial_sidebar_state="auto" faz a barra lateral recolher no celular automaticamente
+st.set_page_config(
+    page_title="Cronograma Dinâmico", 
+    layout="centered", 
+    initial_sidebar_state="auto"
+)
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
-VERSAO_ATUAL = "25.1207.2"
+VERSAO_ATUAL = "25.1207.3"
 
 # Tenta pegar a chave API dos Segredos do Streamlit
 API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
+# --- CSS PERSONALIZADO (Refinamento Visual) ---
+st.markdown("""
+<style>
+    /* Ajusta o tamanho da fonte em telas pequenas */
+    @media (max-width: 600px) {
+        h1 { font-size: 1.8rem !important; }
+        .streamlit-expanderHeader { font-size: 1rem !important; }
+    }
+    /* Deixa o texto justificado para melhor leitura */
+    p { text-align: justify; }
+</style>
+""", unsafe_allow_html=True)
+
 # --- FUNÇÕES DE BANCO DE DADOS ---
 def carregar_dados():
-    # Estrutura padrão caso o arquivo não exista
     dados_padrao = {
         "titulo": "📜 Cronograma Profético Dinâmico",
         "eventos": []
@@ -27,7 +45,6 @@ def carregar_dados():
     with open(ARQUIVO_DADOS, 'r', encoding='utf-8') as f:
         try:
             conteudo = json.load(f)
-            # Migração: Se o arquivo antigo era apenas uma lista, converte para o novo formato
             if isinstance(conteudo, list):
                 return {"titulo": "📜 Cronograma Profético Dinâmico", "eventos": conteudo}
             return conteudo
@@ -83,30 +100,28 @@ titulo_atual = dados_app.get("titulo", "Cronograma Profético")
 
 # --- INTERFACE DO USUÁRIO ---
 
-# Exibe o título editável
 st.title(titulo_atual)
-st.markdown("Amplie os itens abaixo para ver os fatos históricos e as escrituras.")
+st.caption("Toque nos itens abaixo para expandir e ler.")
 
 # --- BARRA LATERAL (LOGIN E CONFIGURAÇÕES) ---
 with st.sidebar:
     st.header("⚙️ Área do Editor")
     senha_input = st.text_input("Senha de Acesso", type="password")
     
-    # SENHA (Alterar conforme necessidade)
-    SENHA_CORRETA = "R$Masterkey01" 
+    # SENHA DE ADMIN
+    SENHA_CORRETA = "1234" 
     admin_mode = (senha_input == SENHA_CORRETA)
     
     if admin_mode:
         st.success("✅ Modo Edição Ativo")
         st.divider()
         
-        # --- EDITOR DE TÍTULO ---
         st.subheader("Personalizar")
         novo_titulo = st.text_input("Título do Projeto", value=titulo_atual)
         if novo_titulo != titulo_atual:
             dados_app["titulo"] = novo_titulo
             salvar_dados(dados_app)
-            st.rerun() # Recarrega a página para atualizar o título
+            st.rerun()
             
     elif senha_input:
         st.error("Senha incorreta")
@@ -119,6 +134,7 @@ if admin_mode:
     with st.expander("➕ Adicionar Novo Evento", expanded=False):
         st.write("Preencha o tópico e use a IA para buscar o texto fiel.")
         
+        # Colunas responsivas (empilham no celular)
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
             data_temp = st.text_input("Data (ex: 539 a.C.)", key="in_data")
@@ -149,8 +165,8 @@ if admin_mode:
                     "escritura": txt_biblico
                 }
                 lista_eventos.append(novo_item)
-                dados_app["eventos"] = lista_eventos # Atualiza a lista
-                salvar_dados(dados_app) # Salva tudo
+                dados_app["eventos"] = lista_eventos
+                salvar_dados(dados_app)
                 st.success("Evento salvo!")
                 st.session_state['temp_hist'] = ""
                 st.session_state['temp_bib'] = ""
@@ -166,15 +182,18 @@ else:
         titulo_card = f"🗓️ **{item['data']}** — {item['evento']}"
         
         with st.expander(titulo_card):
-            # Correção aplicada aqui: Usando aspas triplas para segurança
+            # Parte Histórica (Texto Normal)
             st.markdown(f"""
             **Contexto Histórico:**
             {item['historico']}
             """)
             
             st.markdown("---")
-            st.markdown("**📖 Escrituras:**")
-            st.info(item['escritura'])
+            
+            # Parte Bíblica (Itálico)
+            st.markdown("**📖 Escrituras (Texto Fiel):**")
+            # Adicionei underscores (_) em volta do texto para forçar o itálico no Markdown
+            st.info(f"_{item['escritura']}_")
             
             if admin_mode:
                 if st.button("🗑️ Excluir", key=f"del_{i}"):
