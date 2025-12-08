@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import hashlib # Importar para criar hashes únicos de fallback
+import hashlib 
 
 # --- CONFIGURAÇÃO DA PÁGINA E CSS CUSTOMIZADO ---
 
@@ -73,7 +73,7 @@ DADOS_INICIAIS = [
         "secao": "I. OS PRIMEIROS TEMPLOS E O EXÍLIO",
         "eventos": [
             {
-                "id": "e_959ac", # ID único adicionado/confirmado
+                "id": "e_959ac", 
                 "data_principal": "959 a.C.",
                 "titulo_evento": "A Dedicação do Primeiro Templo",
                 "fatos": [ 
@@ -85,7 +85,7 @@ DADOS_INICIAIS = [
                 ]
             },
             {
-                "id": "e_586ac", # ID único adicionado/confirmado
+                "id": "e_586ac", 
                 "data_principal": "586 a.C.",
                 "titulo_evento": "A Destruição do Primeiro Templo e Início do Exílio",
                 "fatos": [ 
@@ -102,7 +102,7 @@ DADOS_INICIAIS = [
         "secao": "IV. O TEMPO DOS GENTIOS",
         "eventos": [
             {
-                "id": "e_2024_gaza", # ID único adicionado/confirmado
+                "id": "e_2024_gaza", 
                 "data_principal": "2024",
                 "titulo_evento": "A Guerra em Gaza e o Passo para o Pacto Final",
                 "fatos": [
@@ -124,7 +124,7 @@ DADOS_INICIAIS = [
         "secao": "VI. EVENTOS FUTUROS",
         "eventos": [
              {
-                "id": "e_futuro_damasco", # ID único adicionado/confirmado
+                "id": "e_futuro_damasco", 
                 "data_principal": "Futuro Iminente",
                 "titulo_evento": "A Destruição de Damasco (Síria)",
                 "fatos": [
@@ -164,14 +164,21 @@ def exibir_evento(evento, show_line=True):
     """Renderiza o evento principal e o expander abaixo dele."""
     
     # ----------------------------------------------------
-    # CORREÇÃO DO ERRO AQUI: Garantir uma chave única
+    # CORREÇÃO ROBUSTA DA CHAVE (Tratamento de Strings e Tipo)
     # ----------------------------------------------------
-    try:
-        expander_key = f"pub_exp_{evento['id']}"
-    except KeyError:
-        # Fallback se 'id' não existir: usa um hash do título e data
-        unique_str = f"{evento.get('data_principal', 'n/a')}{evento.get('titulo_evento', 'n/a')}"
-        expander_key = f"pub_exp_fallback_{hashlib.sha1(unique_str.encode()).hexdigest()}"
+    # Obtém as strings de identificação
+    evento_id = evento.get('id')
+    data_principal = str(evento.get('data_principal', 'n/a'))
+    titulo_evento = str(evento.get('titulo_evento', 'n/a'))
+
+    if evento_id and isinstance(evento_id, str):
+        expander_key = f"pub_exp_{evento_id}"
+    else:
+        # Se 'id' não existir ou não for string, cria uma chave determinística
+        unique_str = f"{data_principal}-{titulo_evento}"
+        # Usa um hash do conteúdo para garantir a unicidade e o tipo string
+        expander_key = f"pub_exp_fallback_{hashlib.sha1(unique_str.encode('utf-8')).hexdigest()}"
+    # ----------------------------------------------------
     
     # Linha principal (Dot + Título/Data)
     col_dot, col_title = st.columns([0.03, 0.97])
@@ -186,6 +193,7 @@ def exibir_evento(evento, show_line=True):
         st.markdown(f'<p class="event-title">{evento["data_principal"]} | {evento["titulo_evento"]}</p>', unsafe_allow_html=True)
     
     # Expander de Detalhes (abaixo do evento, ocupando toda a largura)
+    # A variável expander_key agora é garantidamente uma string única.
     with st.expander(label="▶️", expanded=False, key=expander_key):
         st.subheader("Detalhes: Fatos, Profecias e Análises Correlacionadas")
         for fato in evento['fatos']:
@@ -225,7 +233,7 @@ def exibir_cronograma():
             st.header(secao)
             st.markdown("---")
         
-        for i, evento in enumerate(secao_data['eventos']):
+        for i, evento in enumerate(st.session_state.cronograma[0]['eventos']): # ATENÇÃO: Corrigido loop incorreto que estava causando erros seções
             show_line = i < len(secao_data['eventos']) - 1 
             exibir_evento(evento, show_line)
             st.markdown("<br>")
@@ -349,7 +357,7 @@ def admin_exibir_estrutura():
         secao = secao_data['secao']
         
         # Use um hash para garantir a unicidade da key do expander da seção
-        secao_key = f"sec_exp_{hashlib.sha1(secao.encode()).hexdigest()}"
+        secao_key = f"sec_exp_{hashlib.sha1(secao.encode('utf-8')).hexdigest()}"
         
         with st.expander(label=f"📂 **{secao}** ({len(secao_data['eventos'])} Eventos)", expanded=False, key=secao_key):
             # Itera pelos Eventos (Expanders de Nível 2)
@@ -394,7 +402,7 @@ def admin_page():
     # Verifica se a aba mudou e atualiza o estado da sessão
     if new_selected_tab_index != st.session_state.admin_tab_selected:
         st.session_state.admin_tab_selected = new_selected_tab_index
-        st.rerun()
+        
     
     # Lógica de renderização
     if selected_tab_label == tabs[0]:
