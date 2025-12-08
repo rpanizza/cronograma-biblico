@@ -93,7 +93,7 @@ with st.sidebar:
     senha_input = st.text_input("Senha de Acesso", type="password")
     
     # SENHA (Alterar conforme necessidade)
-    SENHA_CORRETA = "1234" 
+    SENHA_CORRETA = "R$Masterkey01" 
     admin_mode = (senha_input == SENHA_CORRETA)
     
     if admin_mode:
@@ -174,4 +174,15 @@ else:
             
             st.markdown("---")
             st.markdown("**📖 Escrituras:**")
-            st.info(item['
+            st.info(item['escritura'])
+            
+            if admin_mode:
+                if st.button("🗑️ Excluir", key=f"del_{i}"):
+                    lista_eventos.pop(i)
+                    dados_app["eventos"] = lista_eventos
+                    salvar_dados(dados_app)
+                    st.rerun()
+
+# Rodapé
+st.markdown("---")
+st.caption(f"Projeto Cronograma | Versão {VERSAO_ATUAL}")
