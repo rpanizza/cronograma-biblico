@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Mudança estrutural grande
-VERSAO_APP = "1.2.0" 
+# Versão do Aplicativo (App) - Correção de Bug
+VERSAO_APP = "1.2.1" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.7" 
+VERSAO_CONTEUDO = "25.1208.8" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -129,6 +129,7 @@ if 'research_topic' not in st.session_state: st.session_state['research_topic'] 
 if 'research_output' not in st.session_state: st.session_state['research_output'] = ""
 if 'admin_pass_input' not in st.session_state: st.session_state['admin_pass_input'] = ""
 if 'show_add_form' not in st.session_state: st.session_state['show_add_form'] = False
+if 'confirm_exit' not in st.session_state: st.session_state['confirm_exit'] = False
 
 st.markdown("""
 <style>
@@ -409,6 +410,7 @@ st.divider()
 
 def display_event(item, is_sub_event=False, admin_mode=False):
     """Função recursiva para exibir eventos e sub-eventos."""
+    global lista_eventos # <--- CORREÇÃO: Colocado no início da função
     
     # Aplica indentação para sub-eventos
     container_class = "sub-event-card" if is_sub_event else ""
@@ -446,7 +448,6 @@ def display_event(item, is_sub_event=False, admin_mode=False):
                 if st.checkbox("Confirmar Exclusão", key=f"check_del_{item['id']}"):
                     if st.button("🗑️ Excluir permanentemente", key=f"del_{item['id']}"):
                         # Remove o item pelo ID
-                        global lista_eventos
                         lista_eventos = [e for e in lista_eventos if e['id'] != item['id']]
                         dados_app["eventos"] = lista_eventos
                         salvar_dados(dados_app)
@@ -485,4 +486,4 @@ else:
 
 # Rodapé
 st.markdown("---")
-st.caption("Fim do Cronograma.")
+st.caption(f"App v{VERSAO_APP} | Conteúdo v{VERSAO_CONTEUDO}")
