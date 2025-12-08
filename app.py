@@ -259,4 +259,9 @@ if st.session_state.page == 'dashboard':
     show_dashboard()
 elif st.session_state.page == 'login':
     show_login()
-elif st.session_state.page == 'admin' and st
+elif st.session_state.page == 'admin' and st.session_state.get('logged_in'):
+    show_admin_panel()
+else:
+    # Caso de segurança: se o estado estiver corrompido, volta para o dashboard
+    st.session_state.page = 'dashboard'
+    st.experimental_rerun()
