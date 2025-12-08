@@ -3,7 +3,7 @@ import google.generativeai as genai
 import json
 import os
 import re
-import uuid # Necessário para IDs únicos
+import uuid 
 
 # --- CONFIGURAÇÃO INICIAL E VERSÕES ---
 st.set_page_config(
@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Correção de Bug
-VERSAO_APP = "1.2.1" 
+# Versão do Aplicativo (App) - Correção da API Gemini e UX do Prompt
+VERSAO_APP = "1.2.2" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.8" 
+VERSAO_CONTEUDO = "25.1208.9" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -66,8 +66,9 @@ def salvar_dados(dados):
 # --- INTEGRAÇÃO COM GEMINI: CRONOLOGIA (STRICT + EMOJI) ---
 def consultar_gemini_cronologia(topico):
     if not API_KEY: return "⚠️ Erro: Chave API não configurada.", "", ""
+    # Usando modelo atualizado
     genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash') 
     
     prompt = f"""
     Atue como assistente estrito de cronologia bíblica para preenchimento de banco de dados.
@@ -91,7 +92,8 @@ def consultar_gemini_cronologia(topico):
 def consultar_gemini_research(topico, model_name):
     if not API_KEY: return "⚠️ Erro: Chave API não configurada.", ""
     genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel(model_name)
+    # Modelos são passados já atualizados: gemini-2.5-flash ou gemini-2.5-pro
+    model = genai.GenerativeModel(model_name) 
     
     prompt = f"""
     Pesquise e explique o tópico abaixo de forma detalhada e didática, focando em fornecer contexto histórico e referências bíblicas relevantes. 
@@ -110,10 +112,13 @@ def consultar_gemini_research(topico, model_name):
 
 def reset_edit_states():
     """Limpa todos os estados temporários de edição e adição."""
-    for key in ['edit_index', 'temp_hist', 'temp_bib', 'temp_evento', 'research_output', 'research_topic', 'show_add_form']:
+    for key in ['edit_index', 'temp_hist', 'temp_bib', 'temp_evento', 'research_topic', 'show_add_form']:
         if key in st.session_state:
             del st.session_state[key]
-    # Não limpa a senha para o usuário poder re-entrar sem digitar novamente
+    if 'research_input' in st.session_state: # Novo campo
+         del st.session_state['research_input']
+    if 'confirm_exit' in st.session_state:
+        del st.session_state['confirm_exit']
 
 def has_unsaved_changes():
     """Verifica se há conteúdo sendo editado ou adicionado no formulário."""
@@ -125,8 +130,7 @@ def has_unsaved_changes():
 
 # --- INICIALIZAÇÃO DE ESTADO E CSS ---
 if 'edit_index' not in st.session_state: st.session_state['edit_index'] = None
-if 'research_topic' not in st.session_state: st.session_state['research_topic'] = ""
-if 'research_output' not in st.session_state: st.session_state['research_output'] = ""
+if 'research_input' not in st.session_state: st.session_state['research_input'] = "Digite aqui o tópico de pesquisa..." # Novo estado para o prompt unificado
 if 'admin_pass_input' not in st.session_state: st.session_state['admin_pass_input'] = ""
 if 'show_add_form' not in st.session_state: st.session_state['show_add_form'] = False
 if 'confirm_exit' not in st.session_state: st.session_state['confirm_exit'] = False
@@ -342,75 +346,74 @@ if admin_mode:
 
     st.divider()
     
-    # --- FERRAMENTA DE PESQUISA GEMINI ---
+    # --- FERRAMENTA DE PESQUISA GEMINI (UX DE PROMPT UNIFICADO) ---
     with st.expander("🔬 Ferramenta de Estudo e Pesquisa (Gemini)", expanded=False):
         
-        # ... (código da pesquisa Gemini mantido, apenas o campo de texto foi ajustado)
-        
-        def clear_research():
-            # Limpa apenas os estados de pesquisa, não afeta o formulário de adição/edição
-            st.session_state.research_topic = ""
-            st.session_state.research_output = ""
-            st.rerun()
-
         st.subheader("Pesquisa Rápida e Raciocínio Profundo")
         
-        col_model, col_topic = st.columns([1, 2])
+        col_model, col_run = st.columns([1, 2])
         with col_model:
             model_selected = st.selectbox(
                 "Escolha o Modelo",
-                options=['gemini-1.5-flash (Rápido/Padrão)', 'gemini-1.5-pro (Raciocínio 3 Pro)'],
+                options=['gemini-2.5-flash (Rápido/Padrão)', 'gemini-2.5-pro (Raciocínio Pro)'], # Nomes atualizados
                 key='model_selection'
             )
-            model_key = 'gemini-1.5-flash' if 'flash' in model_selected else 'gemini-1.5-pro'
+            model_key = 'gemini-2.5-flash' if 'flash' in model_selected else 'gemini-2.5-pro'
         
-        with col_topic:
-            st.session_state.research_topic = st.text_area(
-                "Tópico de Pesquisa/Estudo", 
-                key='topic_input', 
-                value=st.session_state.research_topic,
-                height=200 
-            )
+        # Campo de Interação Único (Input/Output)
+        st.session_state.research_input = st.text_area(
+            "Digite seu prompt de estudo ou veja o resultado da IA aqui:", 
+            key='research_input', 
+            value=st.session_state.research_input,
+            height=350 # Campo aumentado
+        )
 
-        col_run, col_clear = st.columns([1, 1])
-        if col_run.button("▶️ Executar Pesquisa"):
-            if st.session_state.research_topic:
+        col_run_ai, col_clear = st.columns([1, 1])
+        if col_run_ai.button("▶️ Executar Pesquisa"):
+            if st.session_state.research_input and st.session_state.research_input != "Digite aqui o tópico de pesquisa...":
                 with st.spinner(f"Consultando {model_selected}..."):
-                    st.session_state.research_output = consultar_gemini_research(st.session_state.research_topic, model_key)
+                    # O output é injetado diretamente no input
+                    st.session_state.research_input = consultar_gemini_research(
+                        st.session_state.research_input, model_key
+                    )
             else:
-                st.warning("Digite um tópico para pesquisar.")
+                st.warning("Digite um tópico para pesquisar no campo de interação.")
+            st.rerun()
 
         if col_clear.button("🗑️ Limpar Pesquisa / Novo Assunto"):
-            clear_research()
+            st.session_state.research_input = "Digite aqui o tópico de pesquisa..."
+            st.rerun()
             
         st.markdown("---")
         
-        if st.session_state.research_output:
-            st.subheader("Resultado da Pesquisa")
-            st.markdown(st.session_state.research_output)
+        if st.button("📝 Salvar Resultado no Cronograma"):
+            output = st.session_state.research_input # Pega o texto do campo de interação
             
-            if st.button("📝 Salvar Resultado no Cronograma"):
-                output = st.session_state.research_output
-                hist_match = re.search(r'1\. HISTÓRICO/CONTEXTO(.*?)2\. ESCRITURAS RELACIONADAS', output, re.DOTALL)
-                bib_match = re.search(r'2\. ESCRITURAS RELACIONADAS(.*)', output, re.DOTALL)
-                
-                hist_temp = hist_match.group(1).strip() if hist_match else output
-                bib_temp = bib_match.group(1).strip() if bib_match else "Texto bíblico não separado, por favor, revise manualmente."
-                
-                st.session_state['temp_hist'] = hist_temp
-                st.session_state['temp_bib'] = bib_temp
-                st.session_state['temp_evento'] = st.session_state.research_topic # Usa o tópico de pesquisa como nome
-                st.session_state['show_add_form'] = True 
-                
-                st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Revise a Data, o Título e o Evento Pai.")
-                st.rerun()
+            # Tenta separar o texto nos formatos HISTÓRICO/CONTEXTO e ESCRITURAS RELACIONADAS
+            hist_match = re.search(r'1\. HISTÓRICO/CONTEXTO(.*?)2\. ESCRITURAS RELACIONADAS', output, re.DOTALL)
+            bib_match = re.search(r'2\. ESCRITURAS RELACIONADAS(.*)', output, re.DOTALL)
+            
+            hist_temp = hist_match.group(1).strip() if hist_match else output
+            bib_temp = bib_match.group(1).strip() if bib_match else "Texto bíblico não separado, por favor, revise manualmente."
+            
+            # Define o primeiro parágrafo como título temporário
+            title_match = re.match(r'#+\s*(.*?)\n', output)
+            temp_title = title_match.group(1).strip() if title_match else "Resultado da Pesquisa (Ajustar Título)"
+
+            st.session_state['temp_hist'] = hist_temp
+            st.session_state['temp_bib'] = bib_temp
+            st.session_state['temp_evento'] = temp_title
+            st.session_state['show_add_form'] = True 
+            
+            st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Revise a Data, o Título e o Evento Pai.")
+            st.rerun()
 
 # --- ÁREA DE VISUALIZAÇÃO (LINHA DO TEMPO) ---
 st.divider()
 
 def display_event(item, is_sub_event=False, admin_mode=False):
     """Função recursiva para exibir eventos e sub-eventos."""
-    global lista_eventos # <--- CORREÇÃO: Colocado no início da função
+    global lista_eventos # CORREÇÃO: Colocado no início da função
     
     # Aplica indentação para sub-eventos
     container_class = "sub-event-card" if is_sub_event else ""
