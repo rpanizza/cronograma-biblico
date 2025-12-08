@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Otimização de UX: Remoção de Ferramenta, Visualização Rápida, Pré-preenchimento
-VERSAO_APP = "1.4.0" 
+# Versão do Aplicativo (App) - Correção do SyntaxError: 'return' outside function
+VERSAO_APP = "1.4.1" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.12" 
+VERSAO_CONTEUDO = "25.1208.13" # Incremento da versão do conteúdo devido à alteração no código
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -107,7 +107,6 @@ def consultar_gemini_cronologia(topico):
             analise = partes[4].strip()
             
             # Limpa o emoji e o título para preencher o campo 'final_evento'
-            # (Remove o primeiro caracter se for emoji, mas mantém o emoji no texto completo)
             return data, evento_emoji, profeta_data, biblia, analise
         else:
             # Retorna o texto completo como erro para o usuário verificar
@@ -119,7 +118,7 @@ def consultar_gemini_cronologia(topico):
 
 def reset_edit_states():
     """Limpa todos os estados temporários de edição e adição."""
-    for key in ['edit_index', 'temp_data', 'temp_profeta', 'temp_hist', 'temp_bib', 'temp_evento', 'show_add_form', 'ia_prompt']:
+    for key in ['edit_index', 'temp_data', 'temp_profeta', 'temp_analise', 'temp_bib', 'temp_evento', 'show_add_form', 'ia_prompt']:
         if key in st.session_state:
             del st.session_state[key]
     if 'research_input' in st.session_state:
@@ -132,7 +131,7 @@ def has_unsaved_changes():
     return (st.session_state.edit_index is not None or
             st.session_state.get('temp_data', '') or 
             st.session_state.get('temp_profeta', '') or 
-            st.session_state.get('temp_hist', '') or 
+            st.session_state.get('temp_analise', '') or 
             st.session_state.get('temp_bib', '') or
             st.session_state.get('temp_evento', '') or
             st.session_state.get('ia_prompt', '') or
@@ -238,6 +237,8 @@ if st.session_state.get('status_message'):
         st.success(mensagem)
     elif tipo == 'error':
         st.error(mensagem)
+    elif tipo == 'warning':
+        st.warning(mensagem) # Adicionado para warnings da IA/UX
     st.session_state['status_message'] = None # Limpa após exibição
 
 # LAYOUT DA VERSÃO
@@ -324,11 +325,10 @@ if admin_mode:
     form_titulo = f"✏️ Editando: {item_editado['evento']}" if item_editado else "➕ Adicionar Novo Evento"
     
     # 1. Recupera valores padrão ou temporários
-    # Se editando, usa o valor original. Se adicionando, usa o valor temporário da IA (se houver)
     data_padrao = item_editado['data'] if item_editado else st.session_state.get('temp_data', '')
     evento_padrao = item_editado['evento'] if item_editado else st.session_state.get('temp_evento', '')
     profeta_padrao = item_editado.get('profeta_data', '') if item_editado else st.session_state.get('temp_profeta', '')
-    hist_padrao = item_editado['historico'] if item_editado else st.session_state.get('temp_analise', '') # Mudei de temp_hist para temp_analise
+    hist_padrao = item_editado['historico'] if item_editado else st.session_state.get('temp_analise', '')
     bib_padrao = item_editado['escritura'] if item_editado else st.session_state.get('temp_bib', '')
     parent_id_padrao = item_editado.get('parent_id') if item_editado else None
     
@@ -357,7 +357,7 @@ if admin_mode:
         prompt_ia_input = st.text_area(
             "Prompt para Pesquisa IA / Título do Evento", 
             key='ia_prompt_area', 
-            value=st.session_state.get('ia_prompt', evento_padrao.split(' ', 1)[-1] if evento_padrao else ""), # Tenta remover o emoji se for edição
+            value=st.session_state.get('ia_prompt', evento_padrao.split(' ', 1)[-1] if evento_padrao and evento_padrao[0] in '📜✨❓❌' else evento_padrao), # Tenta remover o emoji se for edição
             height=150
         )
             
@@ -418,8 +418,8 @@ if admin_mode:
                 # Validação mínima
                 if not data_final or not evento_final:
                     st.session_state['status_message'] = ('error', "Data e Título são campos obrigatórios.")
-                    st.rerun()
-                    return
+                    # AQUI ESTAVA O ERRO! Substituí 'return' por 'st.rerun()'
+                    st.rerun() 
 
                 try:
                     novo_item = {
