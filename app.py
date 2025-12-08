@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Correção do SyntaxError na display_event
-VERSAO_APP = "1.5.1" 
+# Versão do Aplicativo (App) - Novo Fluxo: IA -> Prévia -> Salvar Direto (Formulário de Eventos apenas manual/edição)
+VERSAO_APP = "1.6.0" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.15" # Incremento da versão do conteúdo
+VERSAO_CONTEUDO = "25.1208.16" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -111,20 +111,22 @@ def consultar_gemini_cronologia(topico):
 # --- LÓGICA DE ESTADO E SAÍDA DE EDIÇÃO ---
 
 def reset_edit_states():
-    """Limpa todos os estados temporários de edição e adição, e os resultados da IA."""
+    """Limpa todos os estados temporários de edição, adição, e os resultados da IA."""
     # Estados de Edição/Adição
     for key in ['edit_index', 'show_add_form', 'confirm_exit']:
         if key in st.session_state:
             del st.session_state[key]
             
-    # Resultados da IA e temporários do formulário
-    for key in ['temp_data', 'temp_profeta', 'temp_analise', 'temp_bib', 'temp_evento', 'ia_prompt_area', 'ia_response_text']:
+    # Resultados da IA e temporários do formulário (AGORA INCLUI OS TEMPORÁRIOS DO FORMULÁRIO MANUAL)
+    # Excluímos as chaves 'temp_' pois elas não são mais usadas para pré-preenchimento
+    for key in ['ia_prompt_area', 'ia_response_text', 'select_parent_ia']:
         if key in st.session_state:
             del st.session_state[key]
 
 
 def has_unsaved_changes():
     """Verifica se há conteúdo sendo editado ou adicionado no formulário."""
+    # Foca no estado de edição ou se o formulário manual foi expandido e pode ter conteúdo
     return (st.session_state.edit_index is not None or
             st.session_state.get('show_add_form', False))
 
@@ -135,6 +137,7 @@ if 'show_add_form' not in st.session_state: st.session_state['show_add_form'] = 
 if 'confirm_exit' not in st.session_state: st.session_state['confirm_exit'] = False
 if 'status_message' not in st.session_state: st.session_state['status_message'] = None
 if 'ia_response_text' not in st.session_state: st.session_state['ia_response_text'] = "" 
+if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
 
 
 st.markdown("""
@@ -209,28 +212,32 @@ st.markdown("""
         margin-right: 5px;
     }
     
-    /* Esconde a barra de input da senha se logado (melhora visual) */
-    .logged-in .stTextInput:has(input[type="password"]) {
-        display: none;
+    /* Estilo para a prévia da IA (corpo da caixa) */
+    .ia-preview-box {
+        border: 1px solid #004d40;
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 15px;
+    }
+    .ia-preview-box h5 {
+        margin-top: 0;
+        color: #004d40;
+        border-bottom: 1px dashed #e0e0e0;
+        padding-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 
-# --- LÓGICA DE LOGIN (MELHORIA DE SEGURANÇA VISUAL) ---
+# --- LÓGICA DE LOGIN ---
 dados_app = carregar_dados()
 lista_eventos = dados_app["eventos"]
 titulo_atual = dados_app.get("titulo", "Cronograma Profético")
 
-# Verificação de login
-if 'is_admin' not in st.session_state:
-    st.session_state['is_admin'] = False
-
 # Lógica de autenticação
 if st.session_state.admin_pass_input == SENHA_CORRETA and not st.session_state.is_admin:
     st.session_state.is_admin = True
-    # Não limpa a senha, apenas impede que seja reexibida no sidebar se admin_mode for True
-    # st.session_state.admin_pass_input = SENHA_CORRETA 
+    st.rerun() # Reruns para aplicar o estado
 
 admin_mode = st.session_state.is_admin
 
@@ -238,7 +245,6 @@ admin_mode = st.session_state.is_admin
 with st.sidebar:
     st.header("⚙️ Ferramentas")
     
-    # Exibe o input da senha apenas se não estiver logado
     if not admin_mode:
         password_input = st.text_input("Senha de Acesso", type="password", key='admin_pass_input')
         if password_input and password_input != SENHA_CORRETA:
@@ -288,6 +294,7 @@ with st.sidebar:
             mime='application/json'
         )
         
+        # O botão "Cancelar Edição" só aparece se estiver editando um item
         if st.session_state.edit_index is not None:
              if st.button("❌ Cancelar Edição"):
                 st.session_state.edit_index = None
@@ -330,49 +337,16 @@ st.markdown(f"""
 st.caption("Toque nos títulos abaixo para expandir e ver os detalhes.")
 
 
-# --- FORMULÁRIO DE ADIÇÃO/EDIÇÃO (UNIFICADO) ---
+# --- FERRAMENTA DE INTERAÇÃO E PRÉVIA DA IA ---
 if admin_mode:
-    
-    item_editado = None
-    if st.session_state.edit_index is not None:
-        item_editado = lista_eventos[st.session_state.edit_index]
-    
-    form_titulo = f"✏️ Editando: {item_editado['evento']}" if item_editado else "➕ Adicionar Novo Evento"
-    
-    # 1. Recupera valores padrão ou temporários (para pré-preenchimento)
-    data_padrao = item_editado['data'] if item_editado else st.session_state.get('temp_data', '')
-    evento_padrao = item_editado['evento'] if item_editado else st.session_state.get('temp_evento', '')
-    profeta_padrao = item_editado.get('profeta_data', '') if item_editado else st.session_state.get('temp_profeta', '')
-    hist_padrao = item_editado['historico'] if item_editado else st.session_state.get('temp_analise', '')
-    bib_padrao = item_editado['escritura'] if item_editado else st.session_state.get('temp_bib', '')
-    parent_id_padrao = item_editado.get('parent_id') if item_editado else None
-    
-    submit_label = f"✅ Atualizar Evento {data_padrao}" if item_editado else "💾 Salvar Novo Evento"
-
-    # Criar lista de Eventos Principais
-    eventos_principais_options = [
-        {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
-    ]
-    for event in lista_eventos:
-        if not item_editado or event['id'] != item_editado.get('id'):
-            eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
-
-    parent_default_index = 0
-    if parent_id_padrao:
-        for i, option in enumerate(eventos_principais_options):
-            if option['id'] == parent_id_padrao:
-                parent_default_index = i
-                break
-    
-    
-    with st.expander(form_titulo, expanded=(item_editado is not None or st.session_state.get('show_add_form', False))):
-        st.write("Use o campo abaixo para interagir e refinar a pesquisa da IA, depois use **'Preencher Evento Automático'**.")
+    with st.expander("🤖 Ferramenta de Pesquisa IA (Prévia)", expanded=False):
         
-        # --- CAMPO DE PROMPT MAXIMIZADO ---
+        st.write("Insira um tópico para interagir com o Gemini, refinando a pesquisa até obter a resposta desejada.")
+        
+        # 1. CAMPO DE PROMPT MAXIMIZADO
         prompt_ia_input = st.text_area(
             "Prompt para Pesquisa IA (Refinar/Estudar/Interagir)", 
             key='ia_prompt_area', 
-            value=st.session_state.get('ia_prompt_area', evento_padrao.split(' ', 1)[-1] if evento_padrao and evento_padrao[0] in '📜✨❓❌' else evento_padrao), 
             height=150
         )
             
@@ -393,54 +367,166 @@ if admin_mode:
                     if "Erro" in evento_emoji or "❓" in evento_emoji:
                         st.session_state['status_message'] = ('error', f"Falha na IA: {evento_emoji} | {profeta_data}")
                     else:
-                        st.session_state['status_message'] = ('success', "Pesquisa concluída! Use 'Preencher Evento Automático' para revisar os dados.")
+                        st.session_state['status_message'] = ('success', "Pesquisa concluída! Prévia exibida abaixo.")
 
             else:
                 st.session_state['status_message'] = ('warning', "Digite um tópico para pesquisar no campo de interação.")
             st.rerun()
 
-        # 2. BOTÃO PREENCHER EVENTO AUTOMÁTICO
-        if col_ia_fill.button("➡️ Preencher Evento Automático"):
-            ia_data = st.session_state.get('ia_response_text')
-            if ia_data and ia_data.get('evento') and "Erro" not in ia_data['evento']:
-                st.session_state['temp_data'] = ia_data['data']
-                st.session_state['temp_evento'] = ia_data['evento']
-                st.session_state['temp_profeta'] = ia_data['profeta']
-                st.session_state['temp_bib'] = ia_data['biblia']
-                st.session_state['temp_analise'] = ia_data['analise']
-                st.session_state['status_message'] = ('success', "Dados transferidos! Por favor, **revise** e **salve**.")
+        # 2. BOTÃO MOSTRAR PRÉVIA (Novo Nome)
+        if col_ia_fill.button("✨ Mostrar Prévia / Ocultar"):
+            # Apenas inverte o estado da prévia para reexibir ou ocultar
+            if st.session_state.get('ia_response_text'):
+                st.session_state['show_ia_preview'] = not st.session_state.get('show_ia_preview', False)
+                st.rerun()
             else:
                 st.session_state['status_message'] = ('warning', "Execute uma pesquisa de sucesso primeiro.")
-            st.rerun()
+                st.rerun()
 
         st.markdown("---")
+
+        # --- PRÉVIA E SALVAMENTO DIRETO DA IA ---
+        ia_data = st.session_state.get('ia_response_text')
+        
+        if ia_data and st.session_state.get('show_ia_preview', False):
+            if "Erro" not in ia_data['evento']:
+                
+                # Campos necessários para salvar
+                data_ia = ia_data['data']
+                evento_ia = ia_data['evento']
+                profeta_ia = ia_data['profeta']
+                biblia_ia = ia_data['biblia']
+                analise_ia = ia_data['analise']
+                
+                # 1. Prévia Formatada
+                st.markdown("<div class='ia-preview-box'>", unsafe_allow_html=True)
+                st.markdown("<h5>Prévia do Evento da IA (Revisão)</h5>", unsafe_allow_html=True)
+                
+                st.markdown(f"**Data:** `{data_ia}` | **Título:** `{evento_ia}`")
+                st.markdown(f"**Profeta/Data:** *{profeta_ia}*")
+                st.markdown(f"**Escrituras:**")
+                st.info(f"_{biblia_ia}_")
+                st.markdown(f"**Análise:** {analise_ia}")
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # 2. Seleção de Evento Pai
+                eventos_principais_options = [
+                    {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
+                ]
+                for event in lista_eventos:
+                    # Inclui todos os eventos (principais ou filhos) para serem pais
+                    eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
+
+                parent_selection_ia = st.selectbox(
+                    "Escolha o Evento Pai para a Prévia",
+                    options=[opt['evento'] for opt in eventos_principais_options],
+                    index=0,
+                    key='select_parent_ia'
+                )
+                parent_id_ia = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection_ia)
+
+                # 3. Botão de Salvar Direto da Prévia
+                if st.button("💾 Salvar Evento da Prévia", key='save_ia_preview'):
+                    
+                    try:
+                        novo_item = {
+                            "id": str(uuid.uuid4()),
+                            "parent_id": parent_id_ia,
+                            "data": data_ia,
+                            "evento": evento_ia,
+                            "historico": analise_ia,
+                            "escritura": biblia_ia,
+                            "profeta_data": profeta_ia
+                        }
+                        
+                        lista_eventos.append(novo_item)
+                        dados_app["eventos"] = lista_eventos
+                        salvar_dados(dados_app)
+                        
+                        st.session_state['status_message'] = ('success', "✅ Evento da Prévia salvo com sucesso!")
+                        
+                        # Limpa os estados da IA
+                        st.session_state['ia_response_text'] = None 
+                        st.session_state['show_ia_preview'] = False
+                        if 'ia_prompt_area' in st.session_state: del st.session_state['ia_prompt_area']
+                        
+                        st.rerun()
+
+                    except Exception as e:
+                        st.session_state['status_message'] = ('error', f"❌ Falha ao salvar evento da prévia: {str(e)}")
+                        st.rerun()
+            else:
+                 st.session_state['status_message'] = ('error', "Não é possível salvar: O resultado da IA contém erros de formato.")
+                 st.session_state['show_ia_preview'] = False
+                 st.rerun()
+        
+        st.markdown("---")
+
+
+# --- FORMULÁRIO DE ADIÇÃO/EDIÇÃO MANUAL (SEMPRE RETRAÍDO) ---
+if admin_mode:
+    
+    item_editado = None
+    if st.session_state.edit_index is not None:
+        item_editado = lista_eventos[st.session_state.edit_index]
+    
+    form_titulo = f"✏️ Editando: {item_editado['evento']}" if item_editado else "✍️ Adicionar Novo Evento (Manual)"
+    
+    # 1. Recupera valores (apenas para edição)
+    data_padrao = item_editado['data'] if item_editado else ''
+    evento_padrao = item_editado['evento'] if item_editado else ''
+    profeta_padrao = item_editado.get('profeta_data', '') if item_editado else ''
+    hist_padrao = item_editado['historico'] if item_editado else ''
+    bib_padrao = item_editado['escritura'] if item_editado else ''
+    parent_id_padrao = item_editado.get('parent_id') if item_editado else None
+    
+    submit_label = f"✅ Atualizar Evento {data_padrao}" if item_editado else "💾 Salvar Novo Evento"
+
+    # Criar lista de Eventos Principais
+    eventos_principais_options = [
+        {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
+    ]
+    for event in lista_eventos:
+        if not item_editado or event['id'] != item_editado.get('id'):
+            eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
+
+    parent_default_index = 0
+    if parent_id_padrao:
+        for i, option in enumerate(eventos_principais_options):
+            if option['id'] == parent_id_padrao:
+                parent_default_index = i
+                break
+    
+    # Formulário SEMPRE retraído, a menos que esteja em modo edição (edit_index is not None)
+    form_expanded = item_editado is not None 
+
+    with st.expander(form_titulo, expanded=form_expanded):
+        st.write("Use este formulário apenas para **edição** de eventos existentes ou para adicionar dados **manualmente**, sem a ajuda da IA.")
         
         with st.form("form_salvar"):
             
-            # SELECTBOX PARA EVENTO PAI
             parent_selection = st.selectbox(
                 "Escolha o Evento Pai (Título Principal/Capítulo)",
                 options=[opt['evento'] for opt in eventos_principais_options],
                 index=parent_default_index,
-                key='select_parent'
+                key='select_parent_manual'
             )
             parent_id_final = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection)
 
             col_input1, col_input2 = st.columns([1, 2])
             with col_input1:
-                data_final = st.text_input("Data (Ex: 959 a.C. ou Futuro)", key="in_data_final", value=data_padrao)
+                data_final = st.text_input("Data (Ex: 959 a.C. ou Futuro)", key="in_data_final_m", value=data_padrao)
             with col_input2:
-                evento_final = st.text_input("Título Final do Evento (Com Emoji)", value=evento_padrao, key="final_evento")
+                evento_final = st.text_input("Título Final do Evento (Com Emoji)", value=evento_padrao, key="final_evento_m")
             
             txt_profeta_data = st.text_input("Profeta e Data de Escrita (Ex: Livros dos Reis...) ou Título do Capítulo", 
                                              value=profeta_padrao, 
-                                             key="profeta_data_input")
+                                             key="profeta_data_input_m")
             txt_biblico = st.text_area("Escrituras (Texto Fiel) - Sem abreviações", value=bib_padrao, height=200) 
             txt_historico = st.text_area("Análise (Histórica/Hipotética)", value=hist_padrao, height=150) 
             
             if st.form_submit_button(submit_label):
                 
-                # Validação mínima
                 if not data_final or not evento_final:
                     st.session_state['status_message'] = ('error', "Data e Título são campos obrigatórios.")
                     st.rerun() 
@@ -532,8 +618,6 @@ def display_event(item, is_sub_event=False, admin_mode=False):
         data_evento = item['data']
         is_hist = is_historical_analysis(data_evento)
         analise_titulo_emoji = "🌍" if is_hist else "🔮"
-        
-        # CORREÇÃO AQUI: Garante que a expressão ternária esteja em uma única linha
         analise_titulo_texto = "Análise Histórica" if is_hist else "Análise Hipotética"
         
         st.markdown(f"""
@@ -553,8 +637,9 @@ def display_event(item, is_sub_event=False, admin_mode=False):
                 for i, evt in enumerate(lista_eventos):
                     if evt['id'] == item['id']:
                         st.session_state.edit_index = i
+                        # Força a expansão do formulário de edição/manual
+                        st.session_state['show_add_form'] = True 
                         break
-                st.session_state['show_add_form'] = True
                 st.rerun()
 
             with col_delete:
