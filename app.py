@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 # Importação do Google Generative AI (para uso futuro)
-from google import genai 
+# from google import genai 
 
 # --- Configuração Inicial e Estilo Customizado (Timeline) ---
 st.set_page_config(
