@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Novo Fluxo: IA -> Prévia -> Salvar Direto (Formulário de Eventos apenas manual/edição)
-VERSAO_APP = "1.6.0" 
+# Versão do Aplicativo (App) - Correções de UX/IA: Pesquisa via Enter e Campo de Resultado Bruto
+VERSAO_APP = "1.7.0" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.16" 
+VERSAO_CONTEUDO = "25.1208.17" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -72,7 +72,7 @@ def salvar_dados(dados):
 # --- INTEGRAÇÃO COM GEMINI: CRONOLOGIA (STRICT + EMOJI) ---
 def consultar_gemini_cronologia(topico):
     if not API_KEY: 
-        return "⚠️ Erro: Chave API não configurada.", "", "", "", ""
+        return "⚠️ Erro: Chave API não configurada.", "", "", "", "", "Chave API não configurada."
         
     genai.configure(api_key=API_KEY)
     model = genai.GenerativeModel('gemini-2.5-flash') 
@@ -94,6 +94,7 @@ def consultar_gemini_cronologia(topico):
         response = model.generate_content(prompt)
         texto = response.text.strip()
         
+        # O formato agora tem 4 separadores '|||'
         if texto.count("|||") == 4:
             partes = texto.split("|||")
             data = partes[0].strip()
@@ -101,43 +102,75 @@ def consultar_gemini_cronologia(topico):
             profeta_data = partes[2].strip()
             biblia = partes[3].strip()
             analise = partes[4].strip()
-            
-            return data, evento_emoji, profeta_data, biblia, analise
+            # Retorna as 5 partes separadas e o texto bruto
+            return data, evento_emoji, profeta_data, biblia, analise, texto
         else:
-            return "", "❓ Erro de Formato", f"Resultado da IA: {texto}", "", ""
+            # Retorna um texto de erro e o texto bruto para inspeção
+            return "", "❓ Erro de Formato", f"Resultado da IA: {texto}", "", "", texto
     except Exception as e:
-        return "", "❌ Erro de Conexão", f"Erro: {str(e)}", "", ""
+        # Retorna um texto de erro e o erro
+        return "", "❌ Erro de Conexão", f"Erro: {str(e)}", "", "", str(e)
 
 # --- LÓGICA DE ESTADO E SAÍDA DE EDIÇÃO ---
 
 def reset_edit_states():
     """Limpa todos os estados temporários de edição, adição, e os resultados da IA."""
     # Estados de Edição/Adição
-    for key in ['edit_index', 'show_add_form', 'confirm_exit']:
+    for key in ['edit_index', 'show_add_form', 'confirm_exit', 'show_ia_preview']:
         if key in st.session_state:
             del st.session_state[key]
             
-    # Resultados da IA e temporários do formulário (AGORA INCLUI OS TEMPORÁRIOS DO FORMULÁRIO MANUAL)
-    # Excluímos as chaves 'temp_' pois elas não são mais usadas para pré-preenchimento
-    for key in ['ia_prompt_area', 'ia_response_text', 'select_parent_ia']:
+    # Resultados da IA e temporários do formulário
+    for key in ['ia_prompt_area', 'ia_response_text', 'ia_raw_result']:
         if key in st.session_state:
             del st.session_state[key]
 
 
 def has_unsaved_changes():
     """Verifica se há conteúdo sendo editado ou adicionado no formulário."""
-    # Foca no estado de edição ou se o formulário manual foi expandido e pode ter conteúdo
     return (st.session_state.edit_index is not None or
             st.session_state.get('show_add_form', False))
+            
+def run_ia_search(prompt):
+    """Executa a pesquisa da IA e armazena os resultados."""
+    if not prompt:
+        st.session_state['status_message'] = ('warning', "Digite um tópico para pesquisar.")
+        return
+        
+    with st.spinner("Consultando IA e formatando dados..."):
+        data, evento_emoji, profeta_data, biblia, analise, raw_text = consultar_gemini_cronologia(prompt)
+        
+        st.session_state['ia_raw_result'] = raw_text # Armazena o texto bruto
+
+        if "Erro" in evento_emoji or "❓" in evento_emoji:
+            st.session_state['status_message'] = ('error', f"Falha na IA: {evento_emoji} | Verifique o Resultado Bruto.")
+            # Armazena apenas a mensagem de erro formatada, não a quebra de 5 partes
+            st.session_state['ia_response_text'] = None 
+        else:
+            # Armazena as 5 partes separadas
+            ia_full_response = {
+                'data': data, 'evento': evento_emoji, 'profeta': profeta_data, 
+                'biblia': biblia, 'analise': analise
+            }
+            st.session_state['ia_response_text'] = ia_full_response
+            st.session_state['status_message'] = ('success', "Pesquisa concluída! Use 'Mostrar Prévia' para revisar.")
+            # Garante que a prévia esteja oculta por padrão após uma nova pesquisa
+            st.session_state['show_ia_preview'] = False 
+    st.rerun()
 
 # --- INICIALIZAÇÃO DE ESTADO E CSS ---
+# Estados principais
 if 'edit_index' not in st.session_state: st.session_state['edit_index'] = None
 if 'admin_pass_input' not in st.session_state: st.session_state['admin_pass_input'] = ""
 if 'show_add_form' not in st.session_state: st.session_state['show_add_form'] = False
 if 'confirm_exit' not in st.session_state: st.session_state['confirm_exit'] = False
 if 'status_message' not in st.session_state: st.session_state['status_message'] = None
-if 'ia_response_text' not in st.session_state: st.session_state['ia_response_text'] = "" 
 if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
+
+# Estados da IA
+if 'ia_response_text' not in st.session_state: st.session_state['ia_response_text'] = None # Resultado da IA (Formatado)
+if 'ia_raw_result' not in st.session_state: st.session_state['ia_raw_result'] = "" # Resultado Bruto
+if 'show_ia_preview' not in st.session_state: st.session_state['show_ia_preview'] = False # Controle da Prévia
 
 
 st.markdown("""
@@ -225,6 +258,21 @@ st.markdown("""
         border-bottom: 1px dashed #e0e0e0;
         padding-bottom: 5px;
     }
+
+    /* Estilo para o campo de prompt com a 'seta de enter' visual */
+    .stTextArea label {
+        position: relative;
+    }
+    .stTextArea textarea:focus + div > label:after {
+        content: '↵'; /* Seta de Enter */
+        position: absolute;
+        bottom: 5px;
+        right: 15px;
+        font-size: 1.2em;
+        font-weight: bold;
+        color: #004d40;
+        pointer-events: none;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -237,7 +285,7 @@ titulo_atual = dados_app.get("titulo", "Cronograma Profético")
 # Lógica de autenticação
 if st.session_state.admin_pass_input == SENHA_CORRETA and not st.session_state.is_admin:
     st.session_state.is_admin = True
-    st.rerun() # Reruns para aplicar o estado
+    st.rerun()
 
 admin_mode = st.session_state.is_admin
 
@@ -294,7 +342,6 @@ with st.sidebar:
             mime='application/json'
         )
         
-        # O botão "Cancelar Edição" só aparece se estiver editando um item
         if st.session_state.edit_index is not None:
              if st.button("❌ Cancelar Edição"):
                 st.session_state.edit_index = None
@@ -341,124 +388,109 @@ st.caption("Toque nos títulos abaixo para expandir e ver os detalhes.")
 if admin_mode:
     with st.expander("🤖 Ferramenta de Pesquisa IA (Prévia)", expanded=False):
         
-        st.write("Insira um tópico para interagir com o Gemini, refinando a pesquisa até obter a resposta desejada.")
+        st.write("Insira um tópico e pressione **Enter** (ou Ctrl+Enter) para interagir com o Gemini.")
         
-        # 1. CAMPO DE PROMPT MAXIMIZADO
+        # 1. CAMPO DE PROMPT (Pesquisa ativada por Enter)
         prompt_ia_input = st.text_area(
             "Prompt para Pesquisa IA (Refinar/Estudar/Interagir)", 
             key='ia_prompt_area', 
-            height=150
+            height=150,
+            # Configura o callback para executar a pesquisa ao pressionar Ctrl+Enter (ou a tecla nativa do Streamlit para text_area)
+            on_change=lambda: run_ia_search(st.session_state.ia_prompt_area)
         )
-            
-        col_ia_run, col_ia_fill = st.columns([1, 1.5])
         
-        # 1. BOTÃO PESQUISAR CRONOLOGIA (Interação)
-        if col_ia_run.button("🔍 Pesquisar Cronologia"):
-            if prompt_ia_input:
-                with st.spinner("Consultando IA e formatando dados..."):
-                    data, evento_emoji, profeta_data, biblia, analise = consultar_gemini_cronologia(prompt_ia_input)
-                    
-                    ia_full_response = {
-                        'data': data, 'evento': evento_emoji, 'profeta': profeta_data, 
-                        'biblia': biblia, 'analise': analise
-                    }
-                    st.session_state['ia_response_text'] = ia_full_response
-                    
-                    if "Erro" in evento_emoji or "❓" in evento_emoji:
-                        st.session_state['status_message'] = ('error', f"Falha na IA: {evento_emoji} | {profeta_data}")
-                    else:
-                        st.session_state['status_message'] = ('success', "Pesquisa concluída! Prévia exibida abaixo.")
+        st.caption("Dica: Use **Ctrl + Enter** ou **Cmd + Enter** no campo acima para pesquisar.")
 
-            else:
-                st.session_state['status_message'] = ('warning', "Digite um tópico para pesquisar no campo de interação.")
-            st.rerun()
-
-        # 2. BOTÃO MOSTRAR PRÉVIA (Novo Nome)
-        if col_ia_fill.button("✨ Mostrar Prévia / Ocultar"):
-            # Apenas inverte o estado da prévia para reexibir ou ocultar
-            if st.session_state.get('ia_response_text'):
-                st.session_state['show_ia_preview'] = not st.session_state.get('show_ia_preview', False)
-                st.rerun()
-            else:
-                st.session_state['status_message'] = ('warning', "Execute uma pesquisa de sucesso primeiro.")
-                st.rerun()
+        # 2. CAMPO DE RESULTADO BRUTO
+        st.markdown("---")
+        st.subheader("Resultado Bruto da IA")
+        st.text_area(
+            "Resultado da IA (Verifique a formatação com '|||')",
+            value=st.session_state.get('ia_raw_result', 'Nenhum resultado de pesquisa.'),
+            key='ia_raw_result_display',
+            height=150,
+            disabled=True 
+        )
 
         st.markdown("---")
+        
+        ia_data = st.session_state.get('ia_response_text')
+        is_ia_result_valid = ia_data is not None and "Erro" not in ia_data.get('evento', '')
+        
+        # 3. BOTÃO MOSTRAR PRÉVIA (Desabilitado até ter resultado válido)
+        if st.button("✨ Mostrar Prévia / Ocultar", disabled=not is_ia_result_valid):
+            if is_ia_result_valid:
+                # Inverte o estado da prévia para reexibir ou ocultar
+                st.session_state['show_ia_preview'] = not st.session_state.get('show_ia_preview', False)
+            st.rerun()
 
         # --- PRÉVIA E SALVAMENTO DIRETO DA IA ---
-        ia_data = st.session_state.get('ia_response_text')
-        
-        if ia_data and st.session_state.get('show_ia_preview', False):
-            if "Erro" not in ia_data['evento']:
-                
-                # Campos necessários para salvar
-                data_ia = ia_data['data']
-                evento_ia = ia_data['evento']
-                profeta_ia = ia_data['profeta']
-                biblia_ia = ia_data['biblia']
-                analise_ia = ia_data['analise']
-                
-                # 1. Prévia Formatada
-                st.markdown("<div class='ia-preview-box'>", unsafe_allow_html=True)
-                st.markdown("<h5>Prévia do Evento da IA (Revisão)</h5>", unsafe_allow_html=True)
-                
-                st.markdown(f"**Data:** `{data_ia}` | **Título:** `{evento_ia}`")
-                st.markdown(f"**Profeta/Data:** *{profeta_ia}*")
-                st.markdown(f"**Escrituras:**")
-                st.info(f"_{biblia_ia}_")
-                st.markdown(f"**Análise:** {analise_ia}")
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-                # 2. Seleção de Evento Pai
-                eventos_principais_options = [
-                    {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
-                ]
-                for event in lista_eventos:
-                    # Inclui todos os eventos (principais ou filhos) para serem pais
-                    eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
+        if is_ia_result_valid and st.session_state.get('show_ia_preview', False):
+            
+            # Campos necessários para salvar
+            data_ia = ia_data['data']
+            evento_ia = ia_data['evento']
+            profeta_ia = ia_data['profeta']
+            biblia_ia = ia_data['biblia']
+            analise_ia = ia_data['analise']
+            
+            # 1. Prévia Formatada
+            st.markdown("<div class='ia-preview-box'>", unsafe_allow_html=True)
+            st.markdown("<h5>Prévia do Evento da IA (Revisão)</h5>", unsafe_allow_html=True)
+            
+            st.markdown(f"**Data:** `{data_ia}` | **Título:** `{evento_ia}`")
+            st.markdown(f"**Profeta/Data:** *{profeta_ia}*")
+            st.markdown(f"**Escrituras:**")
+            st.info(f"_{biblia_ia}_")
+            st.markdown(f"**Análise:** {analise_ia}")
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            # 2. Seleção de Evento Pai
+            eventos_principais_options = [
+                {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
+            ]
+            for event in lista_eventos:
+                eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
 
-                parent_selection_ia = st.selectbox(
-                    "Escolha o Evento Pai para a Prévia",
-                    options=[opt['evento'] for opt in eventos_principais_options],
-                    index=0,
-                    key='select_parent_ia'
-                )
-                parent_id_ia = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection_ia)
+            parent_selection_ia = st.selectbox(
+                "Escolha o Evento Pai para a Prévia",
+                options=[opt['evento'] for opt in eventos_principais_options],
+                index=0,
+                key='select_parent_ia'
+            )
+            parent_id_ia = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection_ia)
 
-                # 3. Botão de Salvar Direto da Prévia
-                if st.button("💾 Salvar Evento da Prévia", key='save_ia_preview'):
+            # 3. Botão de Salvar Direto da Prévia
+            if st.button("💾 Salvar Evento da Prévia", key='save_ia_preview'):
+                
+                try:
+                    novo_item = {
+                        "id": str(uuid.uuid4()),
+                        "parent_id": parent_id_ia,
+                        "data": data_ia,
+                        "evento": evento_ia,
+                        "historico": analise_ia,
+                        "escritura": biblia_ia,
+                        "profeta_data": profeta_ia
+                    }
                     
-                    try:
-                        novo_item = {
-                            "id": str(uuid.uuid4()),
-                            "parent_id": parent_id_ia,
-                            "data": data_ia,
-                            "evento": evento_ia,
-                            "historico": analise_ia,
-                            "escritura": biblia_ia,
-                            "profeta_data": profeta_ia
-                        }
-                        
-                        lista_eventos.append(novo_item)
-                        dados_app["eventos"] = lista_eventos
-                        salvar_dados(dados_app)
-                        
-                        st.session_state['status_message'] = ('success', "✅ Evento da Prévia salvo com sucesso!")
-                        
-                        # Limpa os estados da IA
-                        st.session_state['ia_response_text'] = None 
-                        st.session_state['show_ia_preview'] = False
-                        if 'ia_prompt_area' in st.session_state: del st.session_state['ia_prompt_area']
-                        
-                        st.rerun()
+                    lista_eventos.append(novo_item)
+                    dados_app["eventos"] = lista_eventos
+                    salvar_dados(dados_app)
+                    
+                    st.session_state['status_message'] = ('success', "✅ Evento da Prévia salvo com sucesso!")
+                    
+                    # Limpa os estados da IA e prévia
+                    st.session_state['ia_response_text'] = None 
+                    st.session_state['ia_raw_result'] = ""
+                    st.session_state['show_ia_preview'] = False
+                    if 'ia_prompt_area' in st.session_state: del st.session_state['ia_prompt_area']
+                    
+                    st.rerun()
 
-                    except Exception as e:
-                        st.session_state['status_message'] = ('error', f"❌ Falha ao salvar evento da prévia: {str(e)}")
-                        st.rerun()
-            else:
-                 st.session_state['status_message'] = ('error', "Não é possível salvar: O resultado da IA contém erros de formato.")
-                 st.session_state['show_ia_preview'] = False
-                 st.rerun()
+                except Exception as e:
+                    st.session_state['status_message'] = ('error', f"❌ Falha ao salvar evento da prévia: {str(e)}")
+                    st.rerun()
         
         st.markdown("---")
 
@@ -637,7 +669,6 @@ def display_event(item, is_sub_event=False, admin_mode=False):
                 for i, evt in enumerate(lista_eventos):
                     if evt['id'] == item['id']:
                         st.session_state.edit_index = i
-                        # Força a expansão do formulário de edição/manual
                         st.session_state['show_add_form'] = True 
                         break
                 st.rerun()
