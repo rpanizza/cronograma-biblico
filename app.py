@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Correções de UX/IA: Pesquisa via Enter e Campo de Resultado Bruto
-VERSAO_APP = "1.7.0" 
+# Versão do Aplicativo (App) - Recriação do Módulo de IA com botão explícito
+VERSAO_APP = "1.8.0" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.17" 
+VERSAO_CONTEUDO = "25.1208.18" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -94,7 +94,7 @@ def consultar_gemini_cronologia(topico):
         response = model.generate_content(prompt)
         texto = response.text.strip()
         
-        # O formato agora tem 4 separadores '|||'
+        # O formato deve ter 4 separadores '|||'
         if texto.count("|||") == 4:
             partes = texto.split("|||")
             data = partes[0].strip()
@@ -135,28 +135,35 @@ def run_ia_search(prompt):
     """Executa a pesquisa da IA e armazena os resultados."""
     if not prompt:
         st.session_state['status_message'] = ('warning', "Digite um tópico para pesquisar.")
+        st.session_state['ia_response_text'] = None
+        st.session_state['ia_raw_result'] = ""
+        st.session_state['show_ia_preview'] = False 
         return
         
+    # Limpa estados de visualização antes de pesquisar
+    st.session_state['ia_response_text'] = None
+    st.session_state['ia_raw_result'] = ""
+    st.session_state['show_ia_preview'] = False 
+    
     with st.spinner("Consultando IA e formatando dados..."):
         data, evento_emoji, profeta_data, biblia, analise, raw_text = consultar_gemini_cronologia(prompt)
         
-        st.session_state['ia_raw_result'] = raw_text # Armazena o texto bruto
+        st.session_state['ia_raw_result'] = raw_text # Armazena o texto bruto (sempre)
 
-        if "Erro" in evento_emoji or "❓" in evento_emoji:
-            st.session_state['status_message'] = ('error', f"Falha na IA: {evento_emoji} | Verifique o Resultado Bruto.")
-            # Armazena apenas a mensagem de erro formatada, não a quebra de 5 partes
-            st.session_state['ia_response_text'] = None 
-        else:
-            # Armazena as 5 partes separadas
+        if raw_text.count("|||") == 4:
+            # Formato válido
             ia_full_response = {
                 'data': data, 'evento': evento_emoji, 'profeta': profeta_data, 
                 'biblia': biblia, 'analise': analise
             }
             st.session_state['ia_response_text'] = ia_full_response
-            st.session_state['status_message'] = ('success', "Pesquisa concluída! Use 'Mostrar Prévia' para revisar.")
-            # Garante que a prévia esteja oculta por padrão após uma nova pesquisa
-            st.session_state['show_ia_preview'] = False 
-    st.rerun()
+            st.session_state['status_message'] = ('success', "Pesquisa concluída! Use 'Mostrar Prévia' para revisar e salvar.")
+        else:
+            # Formato inválido
+            st.session_state['status_message'] = ('error', f"Falha no formato da IA. Verifique o Resultado Bruto: Esperado 4 separadores '|||', encontrado {raw_text.count('|||')}.")
+            st.session_state['ia_response_text'] = None # Garante que não há objeto para salvar
+        
+        # Não precisa de st.rerun() dentro do callback, o botão já faz o rerun
 
 # --- INICIALIZAÇÃO DE ESTADO E CSS ---
 # Estados principais
@@ -168,6 +175,7 @@ if 'status_message' not in st.session_state: st.session_state['status_message'] 
 if 'is_admin' not in st.session_state: st.session_state['is_admin'] = False
 
 # Estados da IA
+if 'ia_prompt_area' not in st.session_state: st.session_state['ia_prompt_area'] = ""
 if 'ia_response_text' not in st.session_state: st.session_state['ia_response_text'] = None # Resultado da IA (Formatado)
 if 'ia_raw_result' not in st.session_state: st.session_state['ia_raw_result'] = "" # Resultado Bruto
 if 'show_ia_preview' not in st.session_state: st.session_state['show_ia_preview'] = False # Controle da Prévia
@@ -259,20 +267,11 @@ st.markdown("""
         padding-bottom: 5px;
     }
 
-    /* Estilo para o campo de prompt com a 'seta de enter' visual */
-    .stTextArea label {
-        position: relative;
+    /* Oculta completamente a seta de enter que tentamos colocar antes */
+    .stTextArea label:after {
+        content: '' !important;
     }
-    .stTextArea textarea:focus + div > label:after {
-        content: '↵'; /* Seta de Enter */
-        position: absolute;
-        bottom: 5px;
-        right: 15px;
-        font-size: 1.2em;
-        font-weight: bold;
-        color: #004d40;
-        pointer-events: none;
-    }
+    
 </style>
 """, unsafe_allow_html=True)
 
@@ -386,26 +385,30 @@ st.caption("Toque nos títulos abaixo para expandir e ver os detalhes.")
 
 # --- FERRAMENTA DE INTERAÇÃO E PRÉVIA DA IA ---
 if admin_mode:
-    with st.expander("🤖 Ferramenta de Pesquisa IA (Prévia)", expanded=False):
+    with st.expander("🤖 Ferramenta de Pesquisa IA (Nova Versão)", expanded=False):
         
-        st.write("Insira um tópico e pressione **Enter** (ou Ctrl+Enter) para interagir com o Gemini.")
+        st.write("Insira um tópico para interagir com o Gemini, refinando a pesquisa até obter a resposta desejada.")
         
-        # 1. CAMPO DE PROMPT (Pesquisa ativada por Enter)
+        # 1. CAMPO DE PROMPT 
         prompt_ia_input = st.text_area(
-            "Prompt para Pesquisa IA (Refinar/Estudar/Interagir)", 
+            "Prompt para Pesquisa IA (Tópico)", 
             key='ia_prompt_area', 
-            height=150,
-            # Configura o callback para executar a pesquisa ao pressionar Ctrl+Enter (ou a tecla nativa do Streamlit para text_area)
-            on_change=lambda: run_ia_search(st.session_state.ia_prompt_area)
+            height=100
         )
         
-        st.caption("Dica: Use **Ctrl + Enter** ou **Cmd + Enter** no campo acima para pesquisar.")
+        # 2. BOTÃO EXPLÍCITO DE PESQUISA
+        if st.button("🔍 Iniciar Pesquisa Cronológica", key='run_ia_btn'):
+             # Chama a função de pesquisa
+            run_ia_search(st.session_state.ia_prompt_area)
+            # O st.rerun() é chamado dentro de run_ia_search se necessário para atualizar o status/estado
 
-        # 2. CAMPO DE RESULTADO BRUTO
         st.markdown("---")
+
+        # 3. CAMPO DE RESULTADO BRUTO
         st.subheader("Resultado Bruto da IA")
+        st.caption("Verifique se o texto abaixo contém **quatro separadores `|||`** para garantir a formatação correta.")
         st.text_area(
-            "Resultado da IA (Verifique a formatação com '|||')",
+            "Resultado Bruto",
             value=st.session_state.get('ia_raw_result', 'Nenhum resultado de pesquisa.'),
             key='ia_raw_result_display',
             height=150,
@@ -415,12 +418,13 @@ if admin_mode:
         st.markdown("---")
         
         ia_data = st.session_state.get('ia_response_text')
-        is_ia_result_valid = ia_data is not None and "Erro" not in ia_data.get('evento', '')
+        # Verifica se o resultado formatado existe (sinal de que 4 '|||' foram encontrados)
+        is_ia_result_valid = ia_data is not None 
         
-        # 3. BOTÃO MOSTRAR PRÉVIA (Desabilitado até ter resultado válido)
-        if st.button("✨ Mostrar Prévia / Ocultar", disabled=not is_ia_result_valid):
+        # 4. BOTÃO MOSTRAR PRÉVIA (Desabilitado até ter resultado válido)
+        if st.button("✨ Mostrar Prévia / Ocultar", key='toggle_preview_btn', disabled=not is_ia_result_valid):
             if is_ia_result_valid:
-                # Inverte o estado da prévia para reexibir ou ocultar
+                # Inverte o estado da prévia
                 st.session_state['show_ia_preview'] = not st.session_state.get('show_ia_preview', False)
             st.rerun()
 
@@ -484,7 +488,7 @@ if admin_mode:
                     st.session_state['ia_response_text'] = None 
                     st.session_state['ia_raw_result'] = ""
                     st.session_state['show_ia_preview'] = False
-                    if 'ia_prompt_area' in st.session_state: del st.session_state['ia_prompt_area']
+                    st.session_state['ia_prompt_area'] = ""
                     
                     st.rerun()
 
