@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Recriação do Módulo de IA com botão explícito
-VERSAO_APP = "1.8.0" 
+# Versão do Aplicativo (App) - Painel de Controle Centralizado e Edição/Exclusão de Títulos
+VERSAO_APP = "1.9.0" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.18" 
+VERSAO_CONTEUDO = "25.1208.19" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -58,7 +58,8 @@ def carregar_dados():
             for event in conteudo.get("eventos", []):
                 if 'id' not in event:
                     event['id'] = str(uuid.uuid4())
-                if 'parent_id' not in event:
+                # Garante que todos os eventos tenham parent_id
+                if 'parent_id' not in event: 
                     event['parent_id'] = None
             
             return conteudo
@@ -162,8 +163,8 @@ def run_ia_search(prompt):
             # Formato inválido
             st.session_state['status_message'] = ('error', f"Falha no formato da IA. Verifique o Resultado Bruto: Esperado 4 separadores '|||', encontrado {raw_text.count('|||')}.")
             st.session_state['ia_response_text'] = None # Garante que não há objeto para salvar
-        
-        # Não precisa de st.rerun() dentro do callback, o botão já faz o rerun
+    
+    st.rerun()
 
 # --- INICIALIZAÇÃO DE ESTADO E CSS ---
 # Estados principais
@@ -189,7 +190,7 @@ st.markdown("""
     }
     p { text-align: justify; }
     
-    /* Título Principal (Capítulo) */
+    /* Título Principal (Capítulo) - Usado para renderizar o Cronograma na Pré-Visualização */
     .main-chapter-title {
         font-size: 1.5em;
         font-weight: bold;
@@ -200,12 +201,20 @@ st.markdown("""
         padding-bottom: 5px;
     }
     
+    /* Título para os Cards no Painel (para diferenciar do formato final) */
+    .panel-chapter-title {
+        font-size: 1.1em;
+        font-weight: bold;
+        color: #d35400; /* Laranja para destaque no Painel */
+        margin-bottom: 5px;
+    }
+    
     /* Tamanho e hierarquia do texto no corpo */
     .detail-line b { font-size: 1.05em; color: #004d40; }
     .stAlert { font-size: 0.95em; }
     .stMarkdown p { font-size: 0.95em; }
     
-    /* Linha do Tempo Vertical */
+    /* Linha do Tempo Vertical para a PRÉ-VISUALIZAÇÃO (Área Principal) */
     .timeline-container {
         position: relative;
         padding-left: 10px;
@@ -223,6 +232,7 @@ st.markdown("""
         z-index: 0;
     }
 
+    /* Estilo de Card para PRÉ-VISUALIZAÇÃO */
     .timeline-event-card {
         padding-left: 20px;
         margin-top: 10px;
@@ -266,10 +276,18 @@ st.markdown("""
         border-bottom: 1px dashed #e0e0e0;
         padding-bottom: 5px;
     }
-
-    /* Oculta completamente a seta de enter que tentamos colocar antes */
-    .stTextArea label:after {
-        content: '' !important;
+    
+    /* Card de Evento dentro do PAINEL DE CONTROLE (para Edição) */
+    .panel-event-card {
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        padding: 10px;
+        margin-bottom: 10px;
+        background-color: #fafafa;
+    }
+    
+    .panel-event-card .stButton {
+        margin-top: 5px;
     }
     
 </style>
@@ -323,10 +341,11 @@ with st.sidebar:
                 st.session_state['confirm_exit'] = False
 
         st.divider()
-        st.subheader("Personalizar")
-        novo_titulo = st.text_input("Título do Projeto", value=titulo_atual)
-        if novo_titulo != titulo_atual:
-            dados_app["titulo"] = novo_titulo
+        st.subheader("Configurações Gerais")
+        
+        novo_titulo_geral = st.text_input("Título do Projeto", value=titulo_atual)
+        if novo_titulo_geral != titulo_atual:
+            dados_app["titulo"] = novo_titulo_geral
             salvar_dados(dados_app)
             st.rerun()
 
@@ -340,17 +359,154 @@ with st.sidebar:
             file_name='backup_cronograma.json',
             mime='application/json'
         )
-        
-        if st.session_state.edit_index is not None:
-             if st.button("❌ Cancelar Edição"):
-                st.session_state.edit_index = None
-                reset_edit_states()
             
     st.divider()
     st.caption(f"App v{VERSAO_APP} | Conteúdo v{VERSAO_CONTEUDO}")
     
 
-# --- INTERFACE PRINCIPAL ---
+# --- FUNÇÕES DE RENDERIZAÇÃO ---
+
+def is_historical_analysis(data_str):
+    """Determina se a análise deve ser Histórica ou Hipotética com base na data."""
+    data_str_lower = data_str.lower()
+    if "futuro" in data_str_lower or "tribulação" in data_str_lower or not any(char.isdigit() for char in data_str):
+        return False
+    return True 
+
+def display_event_preview(item, is_sub_event=False):
+    """Função recursiva para exibir eventos e sub-eventos na Pré-Visualização (somente leitura)."""
+    
+    # --- TÍTULO PRINCIPAL (CAPÍTULO) ---
+    if item.get('parent_id') is None and not is_sub_event:
+        st.markdown(f"<div class='main-chapter-title'>{item['evento']}</div>", unsafe_allow_html=True)
+        return
+
+    # --- EVENTOS CRONOLÓGICOS (LINHA DO TEMPO) ---
+    
+    st.markdown(f"<div class='timeline-event-card'>", unsafe_allow_html=True)
+    
+    titulo_card = f"**{item['data']}** {item['evento']}" 
+    
+    with st.expander(titulo_card):
+        
+        profeta_data = item.get('profeta_data', 'Não informado')
+        st.markdown(f"""
+        <p class="detail-line">
+            <span class="detail-icon">📅</span> 
+            <b>Profeta e Data:</b> {profeta_data}
+        </p>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
+        
+        st.markdown(f"""
+        <p class="detail-line">
+            <span class="detail-icon">📖</span> 
+            <b>Escrituras (ARA):</b>
+        </p>
+        """, unsafe_allow_html=True)
+        st.info(f"_{item['escritura']}_") 
+        
+        st.markdown("---")
+
+        data_evento = item['data']
+        is_hist = is_historical_analysis(data_evento)
+        analise_titulo_emoji = "🌍" if is_hist else "🔮"
+        analise_titulo_texto = "Análise Histórica" if is_hist else "Análise Hipotética"
+        
+        st.markdown(f"""
+        <p class="detail-line">
+            <span class="detail-icon">{analise_titulo_emoji}</span> 
+            <b>{analise_titulo_texto}:</b>
+        </p>
+        """, unsafe_allow_html=True)
+        st.markdown(f"{item['historico']}") 
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_preview_tree(events_list, events_by_parent):
+    """Renderiza a pré-visualização completa do cronograma (somente leitura)."""
+    
+    def render_recursive(events, parent_id):
+        if parent_id in events:
+            sorted_events = sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False)
+            
+            st.markdown("<div class='timeline-container'>", unsafe_allow_html=True)
+            
+            for item in sorted_events:
+                display_event_preview(item, is_sub_event=True) 
+                
+                if item['id'] in events:
+                    render_recursive(events, item['id']) 
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    if not events_list:
+        st.info("O cronograma está vazio. Faça login e use o Painel de Controle para adicionar eventos.")
+        return
+        
+    # 1. Itera sobre os Títulos Principais (parent_id=None)
+    for principal_event in events_by_parent.get(None, []):
+        
+        display_event_preview(principal_event, is_sub_event=False)
+        
+        # 2. Renderiza Eventos Filhos (Cronológicos) deste Título Principal
+        if principal_event['id'] in events_by_parent:
+            render_recursive(events_by_parent, principal_event['id'])
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        
+def display_event_control(item, admin_mode=False):
+    """Renderiza o card de controle de um evento/título no Painel (com botões de ação)."""
+    global lista_eventos 
+    
+    is_title = item.get('parent_id') is None
+    
+    st.markdown("<div class='panel-event-card'>", unsafe_allow_html=True)
+    
+    if is_title:
+        st.markdown(f"<div class='panel-chapter-title'>[CAPÍTULO] {item['evento']}</div>", unsafe_allow_html=True)
+    else:
+        # Usa o 'data' no título do card no painel para facilitar identificação
+        st.markdown(f"**{item['data']}** - {item['evento']}")
+        
+    st.caption(f"ID: {item['id'][:8]}...")
+    
+    col_edit, col_delete = st.columns([1, 1])
+    
+    if col_edit.button("✏️ Editar", key=f"edit_panel_{item['id']}"):
+        for i, evt in enumerate(lista_eventos):
+            if evt['id'] == item['id']:
+                st.session_state.edit_index = i
+                break
+        # Força a expansão do Painel e do Formulário de Edição
+        st.session_state['control_panel_expanded'] = True
+        st.rerun()
+
+    with col_delete:
+        if st.checkbox("Confirmar Exclusão", key=f"check_del_panel_{item['id']}"):
+            if st.button("🗑️ Excluir permanentemente", key=f"del_panel_{item['id']}"):
+                
+                # Exclui o próprio evento
+                lista_eventos = [e for e in lista_eventos if e['id'] != item['id']]
+                
+                # Se for um título (parent_id=None), desvincula todos os filhos dele
+                if is_title:
+                    for event in lista_eventos:
+                        if event.get('parent_id') == item['id']:
+                            event['parent_id'] = None # Torna o filho em um novo título/capítulo
+                
+                dados_app["eventos"] = lista_eventos
+                salvar_dados(dados_app)
+                reset_edit_states()
+                st.session_state['status_message'] = ('success', f"✅ {'Título' if is_title else 'Evento'} excluído e filhos reassociados, se aplicável.")
+                st.rerun()
+    
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# --- INÍCIO DA INTERFACE PRINCIPAL ---
 
 st.title(titulo_atual)
 
@@ -380,31 +536,50 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.caption("Toque nos títulos abaixo para expandir e ver os detalhes.")
 
-
-# --- FERRAMENTA DE INTERAÇÃO E PRÉVIA DA IA ---
+# --- PAINEL DE CONTROLE CENTRALIZADO (MODO ADMIN) ---
 if admin_mode:
-    with st.expander("🤖 Ferramenta de Pesquisa IA (Nova Versão)", expanded=False):
+    
+    # Renderização da árvore de eventos
+    eventos_por_parent = {}
+    for item in lista_eventos:
+        parent_id = item.get('parent_id') or None
+        if parent_id not in eventos_por_parent:
+            eventos_por_parent[parent_id] = []
+        eventos_por_parent[parent_id].append(item)
+    
+    # Ordena todos os eventos
+    todos_eventos_ordenados = sorted(lista_eventos, key=lambda x: (x.get('parent_id') or x['id'], get_sort_key(x['data'])), reverse=False)
+
+    
+    # Determina se o painel deve estar expandido
+    is_editing = st.session_state.edit_index is not None
+    
+    # Se estiver editando, expande o painel automaticamente. Caso contrário, usa o estado anterior.
+    control_panel_expanded = is_editing or st.session_state.get('control_panel_expanded', False)
+
+    with st.expander("🛠️ Painel de Controle (Edição Completa)", expanded=control_panel_expanded, key='control_panel_expander'):
         
-        st.write("Insira um tópico para interagir com o Gemini, refinando a pesquisa até obter a resposta desejada.")
+        # Salva o estado expandido/contraído
+        st.session_state['control_panel_expanded'] = st.session_state.control_panel_expander
         
-        # 1. CAMPO DE PROMPT 
+        st.header("1. Ferramentas da IA e Prévia")
+        
+        # --- FERRAMENTA DE INTERAÇÃO E PRÉVIA DA IA ---
+        st.subheader("🤖 Pesquisa e Geração de Conteúdo")
+        
         prompt_ia_input = st.text_area(
             "Prompt para Pesquisa IA (Tópico)", 
             key='ia_prompt_area', 
             height=100
         )
         
-        # 2. BOTÃO EXPLÍCITO DE PESQUISA
-        if st.button("🔍 Iniciar Pesquisa Cronológica", key='run_ia_btn'):
-             # Chama a função de pesquisa
+        if st.button("🔍 Iniciar Pesquisa Cronológica", key='run_ia_btn_panel'):
             run_ia_search(st.session_state.ia_prompt_area)
-            # O st.rerun() é chamado dentro de run_ia_search se necessário para atualizar o status/estado
 
         st.markdown("---")
 
-        # 3. CAMPO DE RESULTADO BRUTO
+        # Campo de Resultado Bruto
         st.subheader("Resultado Bruto da IA")
         st.caption("Verifique se o texto abaixo contém **quatro separadores `|||`** para garantir a formatação correta.")
         st.text_area(
@@ -418,20 +593,17 @@ if admin_mode:
         st.markdown("---")
         
         ia_data = st.session_state.get('ia_response_text')
-        # Verifica se o resultado formatado existe (sinal de que 4 '|||' foram encontrados)
         is_ia_result_valid = ia_data is not None 
         
-        # 4. BOTÃO MOSTRAR PRÉVIA (Desabilitado até ter resultado válido)
-        if st.button("✨ Mostrar Prévia / Ocultar", key='toggle_preview_btn', disabled=not is_ia_result_valid):
+        # Botão Mostrar Prévia (Desabilitado até ter resultado válido)
+        if st.button("✨ Mostrar Prévia / Ocultar", key='toggle_preview_btn_panel', disabled=not is_ia_result_valid):
             if is_ia_result_valid:
-                # Inverte o estado da prévia
                 st.session_state['show_ia_preview'] = not st.session_state.get('show_ia_preview', False)
             st.rerun()
 
-        # --- PRÉVIA E SALVAMENTO DIRETO DA IA ---
+        # Prévia e Salvamento Direto da IA
         if is_ia_result_valid and st.session_state.get('show_ia_preview', False):
             
-            # Campos necessários para salvar
             data_ia = ia_data['data']
             evento_ia = ia_data['evento']
             profeta_ia = ia_data['profeta']
@@ -441,11 +613,9 @@ if admin_mode:
             # 1. Prévia Formatada
             st.markdown("<div class='ia-preview-box'>", unsafe_allow_html=True)
             st.markdown("<h5>Prévia do Evento da IA (Revisão)</h5>", unsafe_allow_html=True)
-            
             st.markdown(f"**Data:** `{data_ia}` | **Título:** `{evento_ia}`")
             st.markdown(f"**Profeta/Data:** *{profeta_ia}*")
-            st.markdown(f"**Escrituras:**")
-            st.info(f"_{biblia_ia}_")
+            st.markdown(f"**Escrituras:**"); st.info(f"_{biblia_ia}_")
             st.markdown(f"**Análise:** {analise_ia}")
             st.markdown("</div>", unsafe_allow_html=True)
             
@@ -460,12 +630,12 @@ if admin_mode:
                 "Escolha o Evento Pai para a Prévia",
                 options=[opt['evento'] for opt in eventos_principais_options],
                 index=0,
-                key='select_parent_ia'
+                key='select_parent_ia_panel'
             )
             parent_id_ia = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection_ia)
 
             # 3. Botão de Salvar Direto da Prévia
-            if st.button("💾 Salvar Evento da Prévia", key='save_ia_preview'):
+            if st.button("💾 Salvar Evento da Prévia", key='save_ia_preview_panel'):
                 
                 try:
                     novo_item = {
@@ -483,13 +653,7 @@ if admin_mode:
                     salvar_dados(dados_app)
                     
                     st.session_state['status_message'] = ('success', "✅ Evento da Prévia salvo com sucesso!")
-                    
-                    # Limpa os estados da IA e prévia
-                    st.session_state['ia_response_text'] = None 
-                    st.session_state['ia_raw_result'] = ""
-                    st.session_state['show_ia_preview'] = False
-                    st.session_state['ia_prompt_area'] = ""
-                    
+                    reset_edit_states() # Limpa estados da IA e prévia
                     st.rerun()
 
                 except Exception as e:
@@ -498,235 +662,159 @@ if admin_mode:
         
         st.markdown("---")
 
-
-# --- FORMULÁRIO DE ADIÇÃO/EDIÇÃO MANUAL (SEMPRE RETRAÍDO) ---
-if admin_mode:
-    
-    item_editado = None
-    if st.session_state.edit_index is not None:
-        item_editado = lista_eventos[st.session_state.edit_index]
-    
-    form_titulo = f"✏️ Editando: {item_editado['evento']}" if item_editado else "✍️ Adicionar Novo Evento (Manual)"
-    
-    # 1. Recupera valores (apenas para edição)
-    data_padrao = item_editado['data'] if item_editado else ''
-    evento_padrao = item_editado['evento'] if item_editado else ''
-    profeta_padrao = item_editado.get('profeta_data', '') if item_editado else ''
-    hist_padrao = item_editado['historico'] if item_editado else ''
-    bib_padrao = item_editado['escritura'] if item_editado else ''
-    parent_id_padrao = item_editado.get('parent_id') if item_editado else None
-    
-    submit_label = f"✅ Atualizar Evento {data_padrao}" if item_editado else "💾 Salvar Novo Evento"
-
-    # Criar lista de Eventos Principais
-    eventos_principais_options = [
-        {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
-    ]
-    for event in lista_eventos:
-        if not item_editado or event['id'] != item_editado.get('id'):
-            eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
-
-    parent_default_index = 0
-    if parent_id_padrao:
-        for i, option in enumerate(eventos_principais_options):
-            if option['id'] == parent_id_padrao:
-                parent_default_index = i
-                break
-    
-    # Formulário SEMPRE retraído, a menos que esteja em modo edição (edit_index is not None)
-    form_expanded = item_editado is not None 
-
-    with st.expander(form_titulo, expanded=form_expanded):
-        st.write("Use este formulário apenas para **edição** de eventos existentes ou para adicionar dados **manualmente**, sem a ajuda da IA.")
+        # --- FORMULÁRIO DE ADIÇÃO/EDIÇÃO MANUAL (SEMPRE DENTRO DO PAINEL) ---
+        st.header("2. Adição e Edição Manual")
         
-        with st.form("form_salvar"):
-            
-            parent_selection = st.selectbox(
-                "Escolha o Evento Pai (Título Principal/Capítulo)",
-                options=[opt['evento'] for opt in eventos_principais_options],
-                index=parent_default_index,
-                key='select_parent_manual'
-            )
-            parent_id_final = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection)
+        item_editado = None
+        if st.session_state.edit_index is not None:
+            item_editado = lista_eventos[st.session_state.edit_index]
+        
+        form_titulo = f"✏️ Editando: {item_editado['evento']}" if item_editado else "✍️ Adicionar Novo Evento (Manual)"
+        
+        # 1. Recupera valores (apenas para edição)
+        data_padrao = item_editado['data'] if item_editado else ''
+        evento_padrao = item_editado['evento'] if item_editado else ''
+        profeta_padrao = item_editado.get('profeta_data', '') if item_editado else ''
+        hist_padrao = item_editado['historico'] if item_editado else ''
+        bib_padrao = item_editado['escritura'] if item_editado else ''
+        parent_id_padrao = item_editado.get('parent_id') if item_editado else None
+        
+        submit_label = f"✅ Atualizar Evento {data_padrao}" if item_editado else "💾 Salvar Novo Evento"
 
-            col_input1, col_input2 = st.columns([1, 2])
-            with col_input1:
-                data_final = st.text_input("Data (Ex: 959 a.C. ou Futuro)", key="in_data_final_m", value=data_padrao)
-            with col_input2:
-                evento_final = st.text_input("Título Final do Evento (Com Emoji)", value=evento_padrao, key="final_evento_m")
+        # Criar lista de Eventos Principais para seleção de Pai
+        eventos_principais_options = [
+            {"evento": "Nenhum (Título Principal/Capítulo Novo)", "id": None}
+        ]
+        for event in lista_eventos:
+            if not item_editado or event['id'] != item_editado.get('id'):
+                eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
+
+        parent_default_index = 0
+        if parent_id_padrao:
+            for i, option in enumerate(eventos_principais_options):
+                if option['id'] == parent_id_padrao:
+                    parent_default_index = i
+                    break
+        
+        # Formulário SEMPRE expandido quando em modo edição.
+        form_expanded = item_editado is not None 
+
+        with st.expander(form_titulo, expanded=form_expanded):
+            st.write("Use este formulário para **edição** ou para adicionar dados **manualmente**.")
             
-            txt_profeta_data = st.text_input("Profeta e Data de Escrita (Ex: Livros dos Reis...) ou Título do Capítulo", 
-                                             value=profeta_padrao, 
-                                             key="profeta_data_input_m")
-            txt_biblico = st.text_area("Escrituras (Texto Fiel) - Sem abreviações", value=bib_padrao, height=200) 
-            txt_historico = st.text_area("Análise (Histórica/Hipotética)", value=hist_padrao, height=150) 
-            
-            if st.form_submit_button(submit_label):
+            with st.form("form_salvar_manual_panel"):
                 
-                if not data_final or not evento_final:
-                    st.session_state['status_message'] = ('error', "Data e Título são campos obrigatórios.")
-                    st.rerun() 
+                # Permite definir o item como Título Principal (parent_id=None) ou filho de outro.
+                parent_selection = st.selectbox(
+                    "Escolha o Evento Pai (Deixe em 'Nenhum' para criar um Título/Capítulo Principal)",
+                    options=[opt['evento'] for opt in eventos_principais_options],
+                    index=parent_default_index,
+                    key='select_parent_manual_panel'
+                )
+                parent_id_final = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection)
 
-                try:
-                    novo_item = {
-                        "id": item_editado['id'] if item_editado else str(uuid.uuid4()),
-                        "parent_id": parent_id_final,
-                        "data": data_final,
-                        "evento": evento_final,
-                        "historico": txt_historico,
-                        "escritura": txt_biblico,
-                        "profeta_data": txt_profeta_data
-                    }
+                col_input1, col_input2 = st.columns([1, 2])
+                with col_input1:
+                    # Títulos Principais não precisam de data, mas a IA sempre fornece, então permitimos vazio
+                    data_final = st.text_input("Data (Ex: 959 a.C. ou Futuro)", key="in_data_final_m_panel", value=data_padrao)
+                with col_input2:
+                    evento_final = st.text_input("Título Final do Evento (Com Emoji)", value=evento_padrao, key="final_evento_m_panel")
+                
+                txt_profeta_data = st.text_input("Profeta e Data de Escrita (ou Subtítulo)", 
+                                                 value=profeta_padrao, 
+                                                 key="profeta_data_input_m_panel")
+                txt_biblico = st.text_area("Escrituras (Texto Fiel) - Sem abreviações", value=bib_padrao, height=200) 
+                txt_historico = st.text_area("Análise (Histórica/Hipotética)", value=hist_padrao, height=150) 
+                
+                if st.form_submit_button(submit_label):
                     
-                    if item_editado is not None:
-                        idx = lista_eventos.index(item_editado)
-                        lista_eventos[idx] = novo_item
-                        st.session_state.edit_index = None
-                        status_msg = "✅ Evento atualizado com sucesso!"
-                    else:
-                        lista_eventos.append(novo_item)
-                        status_msg = "✅ Evento salvo com sucesso!"
+                    if not evento_final:
+                        st.session_state['status_message'] = ('error', "O Título do Evento é obrigatório.")
+                        st.rerun() 
+
+                    try:
+                        novo_item = {
+                            "id": item_editado['id'] if item_editado else str(uuid.uuid4()),
+                            "parent_id": parent_id_final,
+                            "data": data_final,
+                            "evento": evento_final,
+                            "historico": txt_historico,
+                            "escritura": txt_biblico,
+                            "profeta_data": txt_profeta_data
+                        }
                         
-                    dados_app["eventos"] = lista_eventos
-                    salvar_dados(dados_app)
-                    
-                    st.session_state['status_message'] = ('success', status_msg)
-                    reset_edit_states() 
-                    st.rerun()
-
-                except Exception as e:
-                    st.session_state['status_message'] = ('error', f"❌ Falha ao salvar evento: {str(e)}")
-                    st.rerun()
-
-    st.divider()
-
-
-# --- ÁREA DE VISUALIZAÇÃO (LINHA DO TEMPO) ---
-
-def is_historical_analysis(data_str):
-    """Determina se a análise deve ser Histórica ou Hipotética com base na data."""
-    data_str_lower = data_str.lower()
-    if "futuro" in data_str_lower or "tribulação" in data_str_lower or not any(char.isdigit() for char in data_str):
-        return False
-    return True 
-
-
-def display_event(item, is_sub_event=False, admin_mode=False):
-    """Função recursiva para exibir eventos e sub-eventos."""
-    global lista_eventos 
-    
-    # --- TÍTULO PRINCIPAL (CAPÍTULO) ---
-    if item.get('parent_id') is None and not is_sub_event:
-        st.markdown(f"<div class='main-chapter-title'>{item['evento']}</div>", unsafe_allow_html=True)
-        return
-
-    # --- EVENTOS CRONOLÓGICOS (LINHA DO TEMPO) ---
-    
-    st.markdown(f"<div class='timeline-event-card'>", unsafe_allow_html=True)
-    
-    titulo_card = f"**{item['data']}** {item['evento']}" 
-    
-    with st.expander(titulo_card):
-        
-        # 1. Profeta e Data
-        profeta_data = item.get('profeta_data', 'Não informado')
-        st.markdown(f"""
-        <p class="detail-line">
-            <span class="detail-icon">📅</span> 
-            <b>Profeta e Data:</b> {profeta_data}
-        </p>
-        """, unsafe_allow_html=True)
-
-        st.markdown("---")
-        
-        # 2. Escrituras (Texto Fiel)
-        st.markdown(f"""
-        <p class="detail-line">
-            <span class="detail-icon">📖</span> 
-            <b>Escrituras (ARA):</b>
-        </p>
-        """, unsafe_allow_html=True)
-        st.info(f"_{item['escritura']}_") 
-        
-        st.markdown("---")
-
-        # 3. Análise (Dinâmica)
-        data_evento = item['data']
-        is_hist = is_historical_analysis(data_evento)
-        analise_titulo_emoji = "🌍" if is_hist else "🔮"
-        analise_titulo_texto = "Análise Histórica" if is_hist else "Análise Hipotética"
-        
-        st.markdown(f"""
-        <p class="detail-line">
-            <span class="detail-icon">{analise_titulo_emoji}</span> 
-            <b>{analise_titulo_texto}:</b>
-        </p>
-        """, unsafe_allow_html=True)
-        st.markdown(f"{item['historico']}") 
-        
-        
-        if admin_mode:
-            st.markdown("---")
-            col_edit, col_delete = st.columns([1, 1])
-            
-            if col_edit.button("✏️ Editar", key=f"edit_{item['id']}"):
-                for i, evt in enumerate(lista_eventos):
-                    if evt['id'] == item['id']:
-                        st.session_state.edit_index = i
-                        st.session_state['show_add_form'] = True 
-                        break
-                st.rerun()
-
-            with col_delete:
-                if st.checkbox("Confirmar Exclusão", key=f"check_del_{item['id']}"):
-                    if st.button("🗑️ Excluir permanentemente", key=f"del_{item['id']}"):
-                        lista_eventos = [e for e in lista_eventos if e['id'] != item['id']]
+                        if item_editado is not None:
+                            idx = lista_eventos.index(item_editado)
+                            lista_eventos[idx] = novo_item
+                            st.session_state.edit_index = None
+                            status_msg = "✅ Evento atualizado com sucesso!"
+                        else:
+                            lista_eventos.append(novo_item)
+                            status_msg = "✅ Evento salvo com sucesso!"
+                            
                         dados_app["eventos"] = lista_eventos
                         salvar_dados(dados_app)
-                        reset_edit_states()
+                        
+                        st.session_state['status_message'] = ('success', status_msg)
+                        reset_edit_states() 
                         st.rerun()
-    
-    st.markdown("</div>", unsafe_allow_html=True)
 
-# --- LÓGICA DE RENDERIZAÇÃO DA ÁRVORE ---
-
-eventos_por_parent = {}
-for item in lista_eventos:
-    parent_id = item.get('parent_id') or None
-    if parent_id not in eventos_por_parent:
-        eventos_por_parent[parent_id] = []
-    eventos_por_parent[parent_id].append(item)
-
-
-def render_event_tree(events, parent_id):
-    if parent_id in events:
-        sorted_events = sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False)
+                    except Exception as e:
+                        st.session_state['status_message'] = ('error', f"❌ Falha ao salvar evento: {str(e)}")
+                        st.rerun()
         
-        st.markdown("<div class='timeline-container'>", unsafe_allow_html=True)
+        # O botão para adicionar novo evento força o formulário a aparecer (limpando o modo edição)
+        if st.session_state.edit_index is None:
+            if st.button("➕ Adicionar Novo Evento/Título Manualmente"):
+                st.session_state.edit_index = None
+                st.session_state['control_panel_expanded'] = True
+                st.rerun()
+
+        st.markdown("---")
         
-        for item in sorted_events:
-            display_event(item, is_sub_event=True, admin_mode=admin_mode) 
+        # --- VISUALIZAÇÃO DA ÁRVORE DE CONTROLE (Edição/Exclusão) ---
+        st.header("3. Gerenciamento de Eventos (Árvore)")
+        st.write("Clique em 'Editar' para abrir o formulário acima.")
+        
+        # Itera sobre os Títulos Principais (parent_id=None) e seus filhos
+        for principal_event in eventos_por_parent.get(None, []):
             
-            if item['id'] in events:
-                render_event_tree(events, item['id']) 
+            # 1. Título Principal
+            display_event_control(principal_event, admin_mode=admin_mode)
+            
+            # 2. Eventos Filhos em um bloco indentado
+            if principal_event['id'] in eventos_por_parent:
+                
+                # Renderiza os filhos
+                sorted_children = sorted(eventos_por_parent[principal_event['id']], key=lambda x: get_sort_key(x['data']), reverse=False)
+                
+                with st.expander(f"Conteúdo de: {principal_event['evento']}", expanded=False):
+                    for child in sorted_children:
+                        display_event_control(child, admin_mode=admin_mode)
+                        
+                        # Se houver sub-níveis (filho de um filho), não exibiremos a recursão aqui
+                        # para manter a interface de controle mais simples e plana.
+                        if child['id'] in eventos_por_parent:
+                             st.caption(f"⚠️ O evento '{child['evento']}' tem subeventos (nível 3). Edite-os separadamente.")
         
-        st.markdown("</div>", unsafe_allow_html=True)
-        
+        st.markdown("---")
+
+# --- ÁREA DE PRÉ-VISUALIZAÇÃO (CORPO PRINCIPAL) ---
+
+st.header("🖼️ Pré-Visualização Final do Cronograma")
+st.caption("Esta é a visualização do usuário final (somente leitura). Use o Painel de Controle para fazer alterações.")
 st.divider()
 
-if not lista_eventos:
-    st.info("O cronograma está vazio. Faça login para começar.")
-else:
-    # 1. Itera sobre os Títulos Principais (parent_id=None)
-    for principal_event in eventos_por_parent.get(None, []):
-        
-        display_event(principal_event, is_sub_event=False, admin_mode=admin_mode)
-        
-        # 2. Renderiza Eventos Filhos (Cronológicos) deste Título Principal
-        if principal_event['id'] in eventos_por_parent:
-            render_event_tree(eventos_por_parent, principal_event['id'])
-        
-        st.markdown("<br>", unsafe_allow_html=True)
+eventos_por_parent_preview = {}
+for item in lista_eventos:
+    parent_id = item.get('parent_id') or None
+    if parent_id not in eventos_por_parent_preview:
+        eventos_por_parent_preview[parent_id] = []
+    eventos_por_parent_preview[parent_id].append(item)
+
+# Renderiza a Pré-Visualização
+render_preview_tree(lista_eventos, eventos_por_parent_preview)
+
 
 # Rodapé
 st.markdown("---")
