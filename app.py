@@ -12,9 +12,9 @@ st.set_page_config(
 )
 
 # Versão do Aplicativo (App) - Muda apenas quando o CÓDIGO muda
-VERSAO_APP = "1.1.0" 
+VERSAO_APP = "1.1.1" 
 # Versão do Conteúdo (Cronologia) - Muda conforme a regra AA.MMDD.V
-VERSAO_CONTEUDO = "25.1208.4" 
+VERSAO_CONTEUDO = "25.1208.5" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -106,12 +106,12 @@ def consultar_gemini_research(topico, model_name):
         return f"Erro ao executar pesquisa com {model_name}: {str(e)}"
 
 
-# --- INICIALIZAÇÃO DE ESTADO ---
+# --- INICIALIZAÇÃO DE ESTADO E CSS ---
 if 'edit_index' not in st.session_state: st.session_state['edit_index'] = None
 if 'research_topic' not in st.session_state: st.session_state['research_topic'] = ""
 if 'research_output' not in st.session_state: st.session_state['research_output'] = ""
+if 'admin_pass_input' not in st.session_state: st.session_state['admin_pass_input'] = ""
     
-# --- CSS PERSONALIZADO ---
 st.markdown("""
 <style>
     @media (max-width: 600px) {
@@ -125,21 +125,40 @@ st.markdown("""
 dados_app = carregar_dados()
 lista_eventos = dados_app["eventos"]
 titulo_atual = dados_app.get("titulo", "Cronograma Profético")
-admin_mode = (st.sidebar.text_input("Senha de Acesso", type="password") == SENHA_CORRETA)
+
+# Senha de Acesso no Sidebar (Define o modo admin)
+password_input = st.sidebar.text_input("Senha de Acesso", type="password", key='admin_pass_input')
+admin_mode = (password_input == SENHA_CORRETA)
 
 # --- INTERFACE PRINCIPAL ---
 
 st.title(titulo_atual)
 
-# LAYOUT DA VERSÃO (Uma abaixo da outra)
-st.markdown(f"**Versão do App:** `{VERSAO_APP}`")
-st.markdown(f"**Versão do Conteúdo:** `{VERSAO_CONTEUDO}`")
+# LAYOUT DA VERSÃO (Otimizado para espaçamento)
+st.markdown(f"""
+<div style='line-height: 1.2; margin-bottom: 1rem;'>
+    <p style='margin: 0; font-size: 0.95em;'>
+        <b>Versão do App:</b> <code>{VERSAO_APP}</code>
+    </p>
+    <p style='margin: 0; font-size: 0.95em;'>
+        <b>Versão do Conteúdo:</b> <code>{VERSAO_CONTEUDO}</code>
+    </p>
+    <p style='margin: 0; font-size: 0.95em;'>
+        <b>Bíblia de Referência:</b> <i>Almeida Revista e Atualizada (ARA)</i>
+    </p>
+</div>
+""", unsafe_allow_html=True)
 
 st.caption("Toque nos itens abaixo para expandir e ler.")
 
 # --- BARRA LATERAL (ADMIN E BACKUP) ---
 with st.sidebar:
     st.header("⚙️ Ferramentas")
+    
+    # AVISO DE SENHA INCORRETA
+    if password_input and password_input != SENHA_CORRETA:
+        st.error("⚠️ Senha incorreta. Acesso negado.")
+
     if admin_mode:
         st.success("✅ Modo Edição Ativo")
         st.divider()
@@ -152,7 +171,7 @@ with st.sidebar:
 
         st.divider()
         st.subheader("Salvamento e Backup")
-        # BOTÃO DE BACKUP EXTERNO
+        
         json_data = json.dumps(dados_app, indent=4, ensure_ascii=False)
         st.download_button(
             label="⬇️ Backup Externo (.json)",
@@ -161,7 +180,6 @@ with st.sidebar:
             mime='application/json'
         )
         
-        # Botão para cancelar edição se estiver no modo edição
         if st.session_state.edit_index is not None:
              if st.button("❌ Cancelar Edição"):
                 st.session_state.edit_index = None
@@ -174,7 +192,6 @@ with st.sidebar:
 # --- FORMULÁRIO DE ADIÇÃO/EDIÇÃO (UNIFICADO) ---
 if admin_mode:
     
-    # Se estiver no modo edição, preenche os dados
     item_editado = None
     if st.session_state.edit_index is not None:
         item_editado = lista_eventos[st.session_state.edit_index]
@@ -204,13 +221,13 @@ if admin_mode:
             else:
                 st.warning("Digite o nome do evento primeiro.")
         
-        # Se a IA preencheu, usa os valores temporários do state
         val_hist = st.session_state.get('temp_hist', hist_padrao)
         val_bib = st.session_state.get('temp_bib', bib_padrao)
         
         with st.form("form_salvar"):
-            txt_historico = st.text_area("Fato Histórico", value=val_hist, height=100)
-            txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=150)
+            # Aumento do campo de descrição do histórico
+            txt_historico = st.text_area("Fato Histórico", value=val_hist, height=150)
+            txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=200) # Aumento do campo
             
             if st.form_submit_button(submit_label):
                 novo_item = {
@@ -239,7 +256,6 @@ if admin_mode:
     # --- FERRAMENTA DE PESQUISA GEMINI ---
     with st.expander("🔬 Ferramenta de Estudo e Pesquisa (Gemini)", expanded=False):
         
-        # Ação para limpar pesquisa
         def clear_research():
             st.session_state.research_topic = ""
             st.session_state.research_output = ""
@@ -258,7 +274,13 @@ if admin_mode:
             model_key = 'gemini-1.5-flash' if 'flash' in model_selected else 'gemini-1.5-pro'
         
         with col_topic:
-            st.session_state.research_topic = st.text_input("Tópico de Pesquisa/Estudo", key='topic_input', value=st.session_state.research_topic)
+            # Aumento do campo de descrição do prompt
+            st.session_state.research_topic = st.text_area(
+                "Tópico de Pesquisa/Estudo", 
+                key='topic_input', 
+                value=st.session_state.research_topic,
+                height=100 # Aumento para facilitar a leitura do prompt
+            )
 
         col_run, col_clear = st.columns([1, 1])
         if col_run.button("▶️ Executar Pesquisa"):
@@ -277,11 +299,7 @@ if admin_mode:
             st.subheader("Resultado da Pesquisa")
             st.markdown(st.session_state.research_output)
             
-            # BOTÃO PARA SALVAR NO CRONOGRAMA
             if st.button("📝 Salvar Resultado no Cronograma"):
-                # Simula a separação Histórico/Escritura para o formulário de adição
-                # Seções: 1. HISTÓRICO/CONTEXTO. 2. ESCRITURAS RELACIONADAS.
-                
                 output = st.session_state.research_output
                 hist_match = re.search(r'1\. HISTÓRICO/CONTEXTO(.*?)2\. ESCRITURAS RELACIONADAS', output, re.DOTALL)
                 bib_match = re.search(r'2\. ESCRITURAS RELACIONADAS(.*)', output, re.DOTALL)
@@ -289,10 +307,9 @@ if admin_mode:
                 hist_temp = hist_match.group(1).strip() if hist_match else output
                 bib_temp = bib_match.group(1).strip() if bib_match else "Texto bíblico não separado, por favor, revise manualmente."
                 
-                # Preenche o formulário principal
                 st.session_state['temp_hist'] = hist_temp
                 st.session_state['temp_bib'] = bib_temp
-                st.session_state['show_add_form'] = True # Força a expansão do formulário
+                st.session_state['show_add_form'] = True 
                 
                 st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Preencha a Data e o Evento e salve.")
                 st.rerun()
@@ -303,14 +320,12 @@ st.divider()
 if not lista_eventos:
     st.info("O cronograma está vazio. Faça login para começar.")
 else:
-    # Ordenação dos eventos usando a função personalizada
     eventos_ordenados = sorted(lista_eventos, key=lambda x: get_sort_key(x['data']), reverse=True)
 
     for i, item in enumerate(eventos_ordenados):
         titulo_card = f"🗓️ **{item['data']}** — {item['evento']}"
         
         with st.expander(titulo_card):
-            # Parte Histórica
             st.markdown(f"""
             **Contexto Histórico:**
             {item['historico']}
@@ -318,21 +333,18 @@ else:
             
             st.markdown("---")
             
-            # Parte Bíblica (Itálico)
             st.markdown("**📖 Escrituras (Texto Fiel):**")
             st.info(f"_{item['escritura']}_")
             
             if admin_mode:
                 col_edit, col_delete = st.columns([1, 1])
                 
-                # BOTÃO DE EDIÇÃO
                 if col_edit.button("✏️ Editar", key=f"edit_{i}"):
                     original_index = lista_eventos.index(item)
                     st.session_state.edit_index = original_index
                     st.session_state['show_add_form'] = True
                     st.rerun()
 
-                # CONFIRMAÇÃO DE EXCLUSÃO
                 with col_delete:
                     if st.checkbox("Confirmar Exclusão", key=f"check_del_{i}"):
                         if st.button("🗑️ Excluir permanentemente", key=f"del_{i}"):
@@ -344,4 +356,4 @@ else:
 
 # Rodapé
 st.markdown("---")
-st.caption("Fim do Cronograma.")
+st.caption(f"App v{VERSAO_APP} | Conteúdo v{VERSAO_CONTEUDO}")
