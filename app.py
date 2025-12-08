@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import hashlib # Importar para criar hashes únicos de fallback
 
 # --- CONFIGURAÇÃO DA PÁGINA E CSS CUSTOMIZADO ---
 
@@ -66,13 +67,13 @@ timeline_css()
 ADMIN_PASSWORD = "R$Masterkey01" 
 
 # --- DADOS INICIAIS (Modelo Aninhado) ---
-# [ Mantendo o mesmo modelo de dados aninhado da versão anterior ]
+# ATENÇÃO: É crucial que cada evento tenha um 'id' único.
 DADOS_INICIAIS = [
     {
         "secao": "I. OS PRIMEIROS TEMPLOS E O EXÍLIO",
         "eventos": [
             {
-                "id": "e_959ac", # ID único para gerenciamento
+                "id": "e_959ac", # ID único adicionado/confirmado
                 "data_principal": "959 a.C.",
                 "titulo_evento": "A Dedicação do Primeiro Templo",
                 "fatos": [ 
@@ -84,7 +85,7 @@ DADOS_INICIAIS = [
                 ]
             },
             {
-                "id": "e_586ac",
+                "id": "e_586ac", # ID único adicionado/confirmado
                 "data_principal": "586 a.C.",
                 "titulo_evento": "A Destruição do Primeiro Templo e Início do Exílio",
                 "fatos": [ 
@@ -101,7 +102,7 @@ DADOS_INICIAIS = [
         "secao": "IV. O TEMPO DOS GENTIOS",
         "eventos": [
             {
-                "id": "e_2024_gaza",
+                "id": "e_2024_gaza", # ID único adicionado/confirmado
                 "data_principal": "2024",
                 "titulo_evento": "A Guerra em Gaza e o Passo para o Pacto Final",
                 "fatos": [
@@ -123,7 +124,7 @@ DADOS_INICIAIS = [
         "secao": "VI. EVENTOS FUTUROS",
         "eventos": [
              {
-                "id": "e_futuro_damasco",
+                "id": "e_futuro_damasco", # ID único adicionado/confirmado
                 "data_principal": "Futuro Iminente",
                 "titulo_evento": "A Destruição de Damasco (Síria)",
                 "fatos": [
@@ -144,7 +145,7 @@ if 'cronograma' not in st.session_state:
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'admin_tab_selected' not in st.session_state:
-    st.session_state.admin_tab_selected = 0 # 0=Estudo, 1=Gerenciar, 2=JSON
+    st.session_state.admin_tab_selected = 0 
 
 # --- FUNÇÕES DE EXIBIÇÃO (Visão Pública) ---
 
@@ -162,6 +163,16 @@ def exibir_fato(fato):
 def exibir_evento(evento, show_line=True):
     """Renderiza o evento principal e o expander abaixo dele."""
     
+    # ----------------------------------------------------
+    # CORREÇÃO DO ERRO AQUI: Garantir uma chave única
+    # ----------------------------------------------------
+    try:
+        expander_key = f"pub_exp_{evento['id']}"
+    except KeyError:
+        # Fallback se 'id' não existir: usa um hash do título e data
+        unique_str = f"{evento.get('data_principal', 'n/a')}{evento.get('titulo_evento', 'n/a')}"
+        expander_key = f"pub_exp_fallback_{hashlib.sha1(unique_str.encode()).hexdigest()}"
+    
     # Linha principal (Dot + Título/Data)
     col_dot, col_title = st.columns([0.03, 0.97])
     
@@ -175,8 +186,7 @@ def exibir_evento(evento, show_line=True):
         st.markdown(f'<p class="event-title">{evento["data_principal"]} | {evento["titulo_evento"]}</p>', unsafe_allow_html=True)
     
     # Expander de Detalhes (abaixo do evento, ocupando toda a largura)
-    # Rótulo minimalista (somente a seta) para atender o pedido de 'caixa oculta'.
-    with st.expander(label="▶️", expanded=False, key=f"pub_exp_{evento['id']}"):
+    with st.expander(label="▶️", expanded=False, key=expander_key):
         st.subheader("Detalhes: Fatos, Profecias e Análises Correlacionadas")
         for fato in evento['fatos']:
             exibir_fato(fato)
@@ -266,8 +276,6 @@ def admin_adicionar_fato(target_event_id=None):
     # Placeholder para a integração futura do Gemini
     if st.button("Analisar com Gemini (Integração Futura)", disabled=True):
         st.warning("Integração da API Gemini ainda pendente. Use o prompt acima para preparar o texto para o formulário abaixo.")
-        # Aqui seria onde o código real da Google AI seria inserido
-        # st.code(f"A API Gemini retornaria a análise ou o texto formatado para o prompt: {prompt}")
 
     st.divider()
 
@@ -279,6 +287,7 @@ def admin_adicionar_fato(target_event_id=None):
     default_index = 0
     if target_event_id:
         try:
+            # Obtém o índice do evento correspondente ao ID
             default_index = next(i for i, opt in enumerate(events_options) if opt['id'] == target_event_id)
         except StopIteration:
             pass
@@ -309,6 +318,7 @@ def admin_adicionar_fato(target_event_id=None):
                 
                 # Lógica para encontrar o evento selecionado e adicionar o fato
                 found = False
+                # Encontra o ID do evento selecionado usando o rótulo
                 selected_id = next(opt['id'] for opt in events_options if opt['label'] == selected_event_label)
                 
                 for secao in st.session_state.cronograma:
@@ -321,7 +331,7 @@ def admin_adicionar_fato(target_event_id=None):
                 
                 if found:
                     st.success(f"Novo Fato adicionado com sucesso ao evento: '{evento['titulo_evento']}'!")
-                    st.rerun() # Recarrega para atualizar a interface
+                    st.rerun() 
                 else:
                     st.error("Erro ao encontrar o evento pai.")
             else:
@@ -329,27 +339,30 @@ def admin_adicionar_fato(target_event_id=None):
 
 
 def admin_exibir_estrutura():
-    """Nova função para gerenciar a estrutura usando expansão por clique (Tree View)."""
+    """Gerenciar a estrutura usando expansão por clique (Tree View)."""
     st.subheader("📝 Gerenciar Estrutura de Seções e Eventos")
     st.info("Clique para expandir as seções e eventos. Use o botão `+` para adicionar fatos rapidamente ao evento.")
-    st.warning("⚠️ Edições (exclusão/modificação de texto) devem ser feitas na tab 'Gerenciar Estrutura Bruta' por enquanto, ou no `st.data_editor` da tab 'Gerenciar Estrutura Bruta'.")
+    st.warning("⚠️ Para edição/exclusão complexa de eventos, use a tab 'Gerenciar Estrutura Bruta (JSON)'.")
 
     # Itera pelas Seções (Expanders de Nível 1)
     for i_secao, secao_data in enumerate(st.session_state.cronograma):
         secao = secao_data['secao']
         
-        with st.expander(label=f"📂 **{secao}** ({len(secao_data['eventos'])} Eventos)", expanded=False):
+        # Use um hash para garantir a unicidade da key do expander da seção
+        secao_key = f"sec_exp_{hashlib.sha1(secao.encode()).hexdigest()}"
+        
+        with st.expander(label=f"📂 **{secao}** ({len(secao_data['eventos'])} Eventos)", expanded=False, key=secao_key):
             # Itera pelos Eventos (Expanders de Nível 2)
             for i_evento, evento in enumerate(secao_data['eventos']):
                 
                 # Expander do Evento
-                with st.expander(label=f"🗓️ {evento['data_principal']} | {evento['titulo_evento']} ({len(evento['fatos'])} Fatos)", expanded=False):
+                evento_key = f"evt_exp_{evento['id']}"
+                with st.expander(label=f"🗓️ {evento['data_principal']} | {evento['titulo_evento']} ({len(evento['fatos'])} Fatos)", expanded=False, key=evento_key):
                     
                     # Botão para Adicionar Fato Rápido
-                    # O truque é mudar o estado da aba selecionada e passar o ID do evento
                     if st.button(f"+ Adicionar Fato a este Evento", key=f"add_fato_{evento['id']}"):
-                        st.session_state.admin_tab_selected = 0 # Vai para a aba de estudos/adição
-                        st.session_state.target_event_id = evento['id'] # Salva o ID do evento
+                        st.session_state.admin_tab_selected = 0 
+                        st.session_state.target_event_id = evento['id']
                         st.rerun()
                         
                     st.markdown("---")
@@ -358,7 +371,7 @@ def admin_exibir_estrutura():
                     # Itera pelos Fatos (Visualização simples)
                     for i_fato, fato in enumerate(evento['fatos']):
                         st.markdown(f"**⚪ Fato {i_fato+1}:** {fato['data_profeta']}")
-                        st.markdown(f" > *Escritura:* {fato['escritura_ara'][:50]}...")
+                        st.markdown(f" > *Escritura:* {fato['escritura_ara'][:50].strip()}...")
                     
                     st.markdown("---")
 
@@ -369,36 +382,35 @@ def admin_page():
     st.markdown("Gerencie o cronograma de eventos proféticos.")
     st.divider()
     
-    # Definição das abas com controle de estado
     tabs = ["🤖 Estudo e Adição de Fatos", "📝 Gerenciar Estrutura (Árvore)", "📄 Gerenciar Estrutura Bruta (JSON)"]
     
-    selected_tab = st.session_state.admin_tab_selected
+    # Define a aba selecionada a partir do estado da sessão
+    selected_tab_index = st.session_state.admin_tab_selected
     
-    # Atualiza a aba selecionada se o usuário clicar
-    selected_tab = st.tabs(tabs, selected_tab)[0]
-    st.session_state.admin_tab_selected = tabs.index(selected_tab)
+    # Renderiza as abas e atualiza o estado
+    selected_tab_label = st.tabs(tabs, selected_tab_index)[0]
+    new_selected_tab_index = tabs.index(selected_tab_label)
+
+    # Verifica se a aba mudou e atualiza o estado da sessão
+    if new_selected_tab_index != st.session_state.admin_tab_selected:
+        st.session_state.admin_tab_selected = new_selected_tab_index
+        st.rerun()
     
     # Lógica de renderização
-    if selected_tab == tabs[0]:
-        # Verifica se houve um redirecionamento do botão '+'
+    if selected_tab_label == tabs[0]:
         target_id = st.session_state.get('target_event_id', None)
         admin_adicionar_fato(target_id)
-        # Limpa o ID após o uso
         if 'target_event_id' in st.session_state:
             del st.session_state['target_event_id'] 
 
-    elif selected_tab == tabs[1]:
+    elif selected_tab_label == tabs[1]:
         admin_exibir_estrutura()
 
-    elif selected_tab == tabs[2]:
+    elif selected_tab_label == tabs[2]:
         st.subheader("📄 Gerenciar Estrutura Bruta (JSON)")
-        st.info("Use esta aba apenas para **backup, edição em massa ou exclusão** complexa, copiando o código, editando e colando de volta, ou usando o `st.data_editor`.")
+        st.info("Use esta aba para inspeção de dados, backup ou edição manual avançada.")
         
-        # Converte a estrutura aninhada para JSON formatado
-        json_data = st.json(st.session_state.cronograma, expanded=False)
-        
-        # Opção de edição manual (avançada)
-        st.warning("Para editar ou excluir diretamente, recomendamos a Tab 2.")
+        st.json(st.session_state.cronograma, expanded=False)
 
 
 # --- FLUXO PRINCIPAL DO APLICATIVO ---
