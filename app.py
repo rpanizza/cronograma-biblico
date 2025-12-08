@@ -12,9 +12,9 @@ st.set_page_config(
 )
 
 # Versão do Aplicativo (App) - Muda apenas quando o CÓDIGO muda
-VERSAO_APP = "1.1.1" 
+VERSAO_APP = "1.1.2" 
 # Versão do Conteúdo (Cronologia) - Muda conforme a regra AA.MMDD.V
-VERSAO_CONTEUDO = "25.1208.5" 
+VERSAO_CONTEUDO = "25.1208.6" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -61,9 +61,9 @@ def salvar_dados(dados):
     with open(ARQUIVO_DADOS, 'w', encoding='utf-8') as f:
         json.dump(dados, f, indent=4, ensure_ascii=False)
 
-# --- INTEGRAÇÃO COM GEMINI: CRONOLOGIA (STRICT) ---
+# --- INTEGRAÇÃO COM GEMINI: CRONOLOGIA (STRICT + EMOJI) ---
 def consultar_gemini_cronologia(topico):
-    if not API_KEY: return "⚠️ Erro: Chave API não configurada.", ""
+    if not API_KEY: return "⚠️ Erro: Chave API não configurada.", "", ""
     
     genai.configure(api_key=API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
@@ -71,20 +71,32 @@ def consultar_gemini_cronologia(topico):
     prompt = f"""
     Atue como assistente estrito de cronologia bíblica para preenchimento de banco de dados.
     Tópico: "{topico}"
-    Sua tarefa é gerar duas partes de texto: 1. Fato histórico. 2. Referência e texto da escritura integralmente.
-    REGRAS CRÍTICAS: Seja fiel *exclusivamente* às escrituras. NÃO use abreviações. NÃO adicione ponto de vista.
-    FORMATO OBRIGATÓRIO: [Fato Histórico] ||| [Referência e Texto Bíblico]
+    
+    Sua tarefa é gerar TRÊS partes de texto:
+    1. UM ÚNICO EMOJI que melhor represente o tema do tópico.
+    2. Um breve fato histórico sobre o evento.
+    3. A referência bíblica e o texto da escritura integralmente.
+
+    REGRAS CRÍTICAS:
+    - O emoji deve ser o primeiro item, sem texto extra.
+    - Seja fiel *exclusivamente* às escrituras nas citações.
+    - NÃO use abreviações. NÃO adicione ponto de vista.
+    
+    FORMATO OBRIGATÓRIO: [EMOJI] ||| [Fato Histórico] ||| [Referência e Texto Bíblico]
     """
     try:
         response = model.generate_content(prompt)
         texto = response.text
-        if "|||" in texto:
+        if texto.count("|||") == 2:
             partes = texto.split("|||")
-            return partes[0].strip(), partes[1].strip()
+            emoji = partes[0].strip()
+            hist = partes[1].strip()
+            bib = partes[2].strip()
+            return emoji, hist, bib
         else:
-            return texto, "Não foi possível separar. Verifique o texto."
+            return "❓", texto, "Não foi possível separar. Verifique o texto."
     except Exception as e:
-        return f"Erro de conexão: {str(e)}", ""
+        return "❌", f"Erro de conexão: {str(e)}", ""
 
 # --- INTEGRAÇÃO COM GEMINI: PESQUISA (FLEXÍVEL) ---
 def consultar_gemini_research(topico, model_name):
@@ -144,7 +156,7 @@ st.markdown(f"""
         <b>Versão do Conteúdo:</b> <code>{VERSAO_CONTEUDO}</code>
     </p>
     <p style='margin: 0; font-size: 0.95em;'>
-        <b>Bíblia de Referência:</b> <i>Almeida Revista e Atualizada (ARA)</i>
+        <b>Bíblia:</b> <i>Almeida Revista e Atualizada (ARA)</i>
     </p>
 </div>
 """, unsafe_allow_html=True)
@@ -215,24 +227,32 @@ if admin_mode:
         if st.button("✨ Pesquisar Cronologia (Fiel) com IA"):
             if evento_temp:
                 with st.spinner("Consultando escrituras..."):
-                    hist_ia, bib_ia = consultar_gemini_cronologia(evento_temp)
+                    emoji_ia, hist_ia, bib_ia = consultar_gemini_cronologia(evento_temp)
+                    
+                    # Concatena emoji ao evento
+                    evento_com_emoji = f"{emoji_ia} {evento_temp}"
+                    
                     st.session_state['temp_hist'] = hist_ia
                     st.session_state['temp_bib'] = bib_ia
+                    st.session_state['temp_evento'] = evento_com_emoji # Salva o evento com emoji
             else:
                 st.warning("Digite o nome do evento primeiro.")
         
+        # Usa o evento com emoji se a IA rodou, senão usa o padrão/editado
+        val_evento = st.session_state.get('temp_evento', evento_padrao)
         val_hist = st.session_state.get('temp_hist', hist_padrao)
         val_bib = st.session_state.get('temp_bib', bib_padrao)
         
         with st.form("form_salvar"):
-            # Aumento do campo de descrição do histórico
+            # O campo de nome de evento é preenchido com o emoji + texto
+            evento_final = st.text_input("Nome do Evento", value=val_evento, key="final_evento")
             txt_historico = st.text_area("Fato Histórico", value=val_hist, height=150)
-            txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=200) # Aumento do campo
+            txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=200) 
             
             if st.form_submit_button(submit_label):
                 novo_item = {
                     "data": data_temp,
-                    "evento": evento_temp,
+                    "evento": evento_final, # Usa o campo final_evento
                     "historico": txt_historico,
                     "escritura": txt_biblico
                 }
@@ -247,8 +267,10 @@ if admin_mode:
                     
                 dados_app["eventos"] = lista_eventos
                 salvar_dados(dados_app)
+                # Limpa estados temporários, inclusive o do evento/emoji
                 st.session_state['temp_hist'] = ""
                 st.session_state['temp_bib'] = ""
+                st.session_state['temp_evento'] = "" 
                 st.rerun()
 
     st.divider()
@@ -274,12 +296,12 @@ if admin_mode:
             model_key = 'gemini-1.5-flash' if 'flash' in model_selected else 'gemini-1.5-pro'
         
         with col_topic:
-            # Aumento do campo de descrição do prompt
+            # Aumento do campo de descrição do prompt - Height=200
             st.session_state.research_topic = st.text_area(
                 "Tópico de Pesquisa/Estudo", 
                 key='topic_input', 
                 value=st.session_state.research_topic,
-                height=100 # Aumento para facilitar a leitura do prompt
+                height=200 
             )
 
         col_run, col_clear = st.columns([1, 1])
@@ -301,6 +323,7 @@ if admin_mode:
             
             if st.button("📝 Salvar Resultado no Cronograma"):
                 output = st.session_state.research_output
+                # Regex para extrair Histórico e Escritura do resultado de pesquisa flexível
                 hist_match = re.search(r'1\. HISTÓRICO/CONTEXTO(.*?)2\. ESCRITURAS RELACIONADAS', output, re.DOTALL)
                 bib_match = re.search(r'2\. ESCRITURAS RELACIONADAS(.*)', output, re.DOTALL)
                 
@@ -311,7 +334,8 @@ if admin_mode:
                 st.session_state['temp_bib'] = bib_temp
                 st.session_state['show_add_form'] = True 
                 
-                st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Preencha a Data e o Evento e salve.")
+                # Não preenche emoji aqui, mas força a abertura do formulário
+                st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Preencha a Data, o Evento (com emoji, se desejar) e salve.")
                 st.rerun()
 
 # --- ÁREA DE VISUALIZAÇÃO (LINHA DO TEMPO) ---
@@ -323,6 +347,7 @@ else:
     eventos_ordenados = sorted(lista_eventos, key=lambda x: get_sort_key(x['data']), reverse=True)
 
     for i, item in enumerate(eventos_ordenados):
+        # O título já inclui o emoji se ele foi adicionado no evento
         titulo_card = f"🗓️ **{item['data']}** — {item['evento']}"
         
         with st.expander(titulo_card):
