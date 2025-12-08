@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Ajuste de formatação e UX da hierarquia
-VERSAO_APP = "1.2.3" 
+# Versão do Aplicativo (App) - Implementação da Linha do Tempo Visual e Títulos Dinâmicos
+VERSAO_APP = "1.3.0" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.10" 
+VERSAO_CONTEUDO = "25.1208.11" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -29,13 +29,20 @@ def get_sort_key(date_str):
     date_str_clean = date_str.lower().replace('.', '').strip()
     match = re.match(r'(\d+)\s*(a\.c\.|ac|d\.c\.|dc)?', date_str_clean)
     if not match: return 0
-    try: year = int(match.group(1))
-    except ValueError: return 0 
+    
+    try: 
+        year = int(match.group(1))
+    except ValueError: 
+        # Trata casos como "Futuro" ou datas não numéricas
+        if "futuro" in date_str_clean or "tribulação" in date_str_clean:
+            return 999999 # Coloca profecias futuras no fim
+        return 0 
+    
     suffix = match.group(2)
     if suffix and ('a.c.' in suffix or 'ac' in suffix):
-        return -year
+        return -year # Inverte a ordem para a.C.
     else:
-        return year
+        return year # Mantém a ordem para d.C.
 
 def carregar_dados():
     dados_padrao = {
@@ -92,7 +99,6 @@ def consultar_gemini_cronologia(topico):
 def consultar_gemini_research(topico, model_name):
     if not API_KEY: return "⚠️ Erro: Chave API não configurada.", ""
     genai.configure(api_key=API_KEY)
-    # Modelos são passados já atualizados: gemini-2.5-flash ou gemini-2.5-pro
     model = genai.GenerativeModel(model_name) 
     
     prompt = f"""
@@ -115,7 +121,7 @@ def reset_edit_states():
     for key in ['edit_index', 'temp_hist', 'temp_bib', 'temp_evento', 'research_topic', 'show_add_form']:
         if key in st.session_state:
             del st.session_state[key]
-    if 'research_input' in st.session_state: # Novo campo
+    if 'research_input' in st.session_state:
          del st.session_state['research_input']
     if 'confirm_exit' in st.session_state:
         del st.session_state['confirm_exit']
@@ -130,7 +136,7 @@ def has_unsaved_changes():
 
 # --- INICIALIZAÇÃO DE ESTADO E CSS ---
 if 'edit_index' not in st.session_state: st.session_state['edit_index'] = None
-if 'research_input' not in st.session_state: st.session_state['research_input'] = "Digite aqui o tópico de pesquisa..." # Novo estado para o prompt unificado
+if 'research_input' not in st.session_state: st.session_state['research_input'] = "Digite aqui o tópico de pesquisa..."
 if 'admin_pass_input' not in st.session_state: st.session_state['admin_pass_input'] = ""
 if 'show_add_form' not in st.session_state: st.session_state['show_add_form'] = False
 if 'confirm_exit' not in st.session_state: st.session_state['confirm_exit'] = False
@@ -139,18 +145,69 @@ st.markdown("""
 <style>
     @media (max-width: 600px) { h1 { font-size: 1.8rem !important; } }
     p { text-align: justify; }
-    /* Estilo para indentação de sub-eventos */
-    .sub-event-card {
-        padding-left: 20px;
-        margin-top: 5px;
-        border-left: 3px solid #f0f2f6; /* Cor da borda para visual de árvore */
-    }
-    .main-event-title {
-        font-size: 1.15em;
+    
+    /* Título Principal (Capítulo) */
+    .main-chapter-title {
+        font-size: 1.5em;
         font-weight: bold;
+        margin-top: 25px;
+        margin-bottom: 15px;
+        color: #004d40; /* Destaque */
+        border-bottom: 2px solid #004d40;
+        padding-bottom: 5px;
+    }
+    
+    /* Linha do Tempo Vertical */
+    .timeline-container {
+        position: relative;
+        padding-left: 10px; /* Espaço para a linha */
+        margin-left: 10px;
+    }
+    
+    /* A linha vertical em si */
+    .timeline-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 3px;
+        background-color: #f0f2f6; /* Cor cinza clara */
+        z-index: 0;
+    }
+
+    /* Estilo para eventos na linha do tempo */
+    .timeline-event-card {
+        padding-left: 20px;
         margin-top: 10px;
-        margin-bottom: 5px;
-        color: #004d40; /* Cor para destacar títulos principais */
+        margin-bottom: 20px;
+        position: relative;
+    }
+    
+    /* Ponto na linha do tempo */
+    .timeline-event-card::before {
+        content: '•';
+        position: absolute;
+        left: -8px; /* Ajusta o ponto sobre a linha */
+        top: 22px; 
+        font-size: 24px;
+        line-height: 0;
+        color: #004d40; /* Cor do ponto */
+        background-color: white; /* Cobre a linha onde o ponto está */
+        border-radius: 50%;
+        padding: 5px;
+        z-index: 1;
+    }
+
+    /* Sobreescreve o padding do st.expander no modo timeline */
+    .timeline-event-card > div[data-testid^="stExpander"] {
+        padding: 0 !important;
+    }
+    
+    /* Emojis para os detalhes */
+    .detail-icon {
+        font-size: 1.1em;
+        margin-right: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -183,7 +240,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.caption("Toque nos itens abaixo para expandir e ler.")
+st.caption("Toque nos títulos abaixo para expandir e ver os detalhes.")
 
 # --- BARRA LATERAL (ADMIN E SAÍDA) ---
 with st.sidebar:
@@ -258,6 +315,7 @@ if admin_mode:
     evento_padrao = item_editado['evento'] if item_editado else ""
     hist_padrao = item_editado['historico'] if item_editado else ""
     bib_padrao = item_editado['escritura'] if item_editado else ""
+    profeta_padrao = item_editado.get('profeta_data', '') if item_editado else ""
     parent_id_padrao = item_editado.get('parent_id') if item_editado else None
     submit_label = f"✅ Atualizar Evento {data_padrao}" if item_editado else "💾 Salvar Novo Evento"
 
@@ -266,13 +324,10 @@ if admin_mode:
         {"evento": "Nenhum (Evento Principal/Raiz)", "id": None}
     ]
     
-    # Adiciona todos os eventos para que sub-eventos também possam ser pais
     for event in lista_eventos:
-        # Garante que não possa ser pai de si mesmo
         if not item_editado or event['id'] != item_editado.get('id'):
             eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
 
-    # Encontra o índice padrão para o selectbox
     parent_default_index = 0
     if parent_id_padrao:
         for i, option in enumerate(eventos_principais_options):
@@ -286,18 +341,17 @@ if admin_mode:
         
         # SELECTBOX PARA EVENTO PAI
         parent_selection = st.selectbox(
-            "Escolha o Evento Pai (Árvore de Estudo)",
+            "Escolha o Evento Pai (Título Principal/Capítulo)",
             options=[opt['evento'] for opt in eventos_principais_options],
             index=parent_default_index
         )
-        # Encontra o ID do evento pai selecionado
         parent_id_final = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection)
         
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
-            data_temp = st.text_input("Data (ex: 08/12/25)", key="in_data", value=data_padrao)
+            data_temp = st.text_input("Data (Ex: 959 a.C. ou Futuro)", key="in_data", value=data_padrao)
         with col_input2:
-            evento_temp = st.text_input("Tópico para IA", key="in_evento_ia", value=evento_padrao) # Novo campo para IA
+            evento_temp = st.text_input("Tópico para IA/Título do Evento", key="in_evento_ia", value=evento_padrao)
             
         if st.button("✨ Pesquisar Cronologia (Fiel) com IA"):
             if evento_temp:
@@ -309,7 +363,7 @@ if admin_mode:
                     
                     st.session_state['temp_hist'] = hist_ia
                     st.session_state['temp_bib'] = bib_ia
-                    st.session_state['temp_evento'] = evento_com_emoji # Salva o evento com emoji
+                    st.session_state['temp_evento'] = evento_com_emoji
             else:
                 st.warning("Digite o nome do evento primeiro.")
         
@@ -319,22 +373,13 @@ if admin_mode:
         val_bib = st.session_state.get('temp_bib', bib_padrao)
         
         with st.form("form_salvar"):
-            # O campo de nome de evento é preenchido com o emoji + texto
-            evento_final = st.text_input("Nome/Título Final do Evento (Com Emoji)", value=val_evento, key="final_evento")
-            txt_historico = st.text_area("Análise Histórica", value=val_hist, height=150) # Título ajustado
-            txt_biblico = st.text_area("Escrituras (Texto Fiel)", value=val_bib, height=200) # Título ajustado
-            
-            # Novo campo para Profeta/Data de escrita (que era extraído da análise histórica antes)
-            profeta_padrao = "" 
-            # Tentativa simples de extrair o profeta da análise, se não estiver editando
-            if not item_editado and "Profeta e Data" in val_hist:
-                 # Esta é uma complexidade desnecessária para o código principal,
-                 # O usuário pode preencher este campo manualmente. 
-                 pass
-
+            evento_final = st.text_input("Título Final do Evento (Com Emoji)", value=val_evento, key="final_evento")
             txt_profeta_data = st.text_input("Profeta e Data de Escrita (Ex: Isaías c. 700 a.C.)", 
-                                             value=item_editado.get('profeta_data', '') if item_editado else "", 
+                                             value=profeta_padrao, 
                                              key="profeta_data_input")
+            txt_biblico = st.text_area("Escrituras (Texto Fiel) - Sem abreviações", value=val_bib, height=200) 
+            # Nome do campo ajustado, mas o conteúdo é flexível
+            txt_historico = st.text_area("Análise (Histórica/Hipotética)", value=val_hist, height=150) 
             
             if st.form_submit_button(submit_label):
                 novo_item = {
@@ -344,23 +389,20 @@ if admin_mode:
                     "evento": evento_final,
                     "historico": txt_historico,
                     "escritura": txt_biblico,
-                    "profeta_data": txt_profeta_data # Salva o novo campo
+                    "profeta_data": txt_profeta_data
                 }
                 
                 if item_editado is not None:
-                    # Modo Edição: Substitui
                     idx = lista_eventos.index(item_editado)
                     lista_eventos[idx] = novo_item
                     st.session_state.edit_index = None
                     st.success("Evento atualizado com sucesso!")
                 else:
-                    # Modo Adição: Adiciona
                     lista_eventos.append(novo_item)
                     st.success("Evento salvo com sucesso!")
                     
                 dados_app["eventos"] = lista_eventos
                 salvar_dados(dados_app)
-                # Limpa estados temporários
                 reset_edit_states()
                 st.rerun()
 
@@ -380,7 +422,6 @@ if admin_mode:
             )
             model_key = 'gemini-2.5-flash' if 'flash' in model_selected else 'gemini-2.5-pro'
         
-        # Campo de Interação Único (Input/Output)
         st.session_state.research_input = st.text_area(
             "Digite seu prompt de estudo ou veja o resultado da IA aqui:", 
             key='research_input', 
@@ -392,7 +433,6 @@ if admin_mode:
         if col_run_ai.button("▶️ Executar Pesquisa"):
             if st.session_state.research_input and st.session_state.research_input != "Digite aqui o tópico de pesquisa...":
                 with st.spinner(f"Consultando {model_selected}..."):
-                    # O output é injetado diretamente no input
                     st.session_state.research_input = consultar_gemini_research(
                         st.session_state.research_input, model_key
                     )
@@ -407,9 +447,8 @@ if admin_mode:
         st.markdown("---")
         
         if st.button("📝 Salvar Resultado no Cronograma"):
-            output = st.session_state.research_input # Pega o texto do campo de interação
+            output = st.session_state.research_input
             
-            # Tenta separar o texto nos formatos HISTÓRICO/CONTEXTO e ESCRITURAS RELACIONADAS
             hist_match = re.search(r'1\. HISTÓRICO/CONTEXTO(.*?)2\. ESCRITURAS RELACIONADAS', output, re.DOTALL)
             bib_match = re.search(r'2\. ESCRITURAS RELACIONADAS(.*)', output, re.DOTALL)
             
@@ -430,49 +469,66 @@ if admin_mode:
 # --- ÁREA DE VISUALIZAÇÃO (LINHA DO TEMPO) ---
 st.divider()
 
+def is_historical_analysis(data_str):
+    """Determina se a análise deve ser Histórica ou Hipotética com base na data."""
+    data_str_lower = data_str.lower()
+    # Se a data contiver "futuro", "fim", "tribulação" ou não contiver um número (não cronológico), é Hipotética.
+    if "futuro" in data_str_lower or "tribulação" in data_str_lower or not any(char.isdigit() for char in data_str):
+        return False
+    return True # Assume-se que a.C., d.C. ou datas conhecidas são Históricas.
+
+
 def display_event(item, is_sub_event=False, admin_mode=False):
     """Função recursiva para exibir eventos e sub-eventos."""
     global lista_eventos 
     
-    # Se for um Título Principal (is_sub_event=False e não tem parent_id), formata diferente.
+    # --- TÍTULO PRINCIPAL (CAPÍTULO) ---
     if item.get('parent_id') is None and not is_sub_event:
-        # Título Principal (Capítulo)
-        st.markdown(f"<div class='main-event-title'>{item['evento']}</div>", unsafe_allow_html=True)
-        # O título principal não expande, ele serve apenas como agrupador visual.
-        # Se você quiser que o título principal seja um expander, teria que aninhar os eventos filhos aqui.
-        return # Não processa os detalhes do evento raiz no corpo principal
+        st.markdown(f"<div class='main-chapter-title'>{item['evento']}</div>", unsafe_allow_html=True)
+        return
 
-    # --- FORMATO DOS EVENTOS CRONOLÓGICOS ---
+    # --- EVENTOS CRONOLÓGICOS (LINHA DO TEMPO) ---
     
-    # Aplica indentação para sub-eventos
-    container_class = "sub-event-card" if is_sub_event else ""
-    
-    st.markdown(f"<div class='{container_class}'>", unsafe_allow_html=True)
+    # Aplica o estilo da Linha do Tempo
+    st.markdown(f"<div class='timeline-event-card'>", unsafe_allow_html=True)
     
     # O evento é o título com a data: "959 a.C. A Dedicação do Primeiro Templo"
-    titulo_card = f"🗓️ **{item['data']}** — {item['evento']}" 
+    # Note que o emoji do evento está no item['evento']
+    titulo_card = f"**{item['data']}** {item['evento']}" 
     
     with st.expander(titulo_card):
         
-        # 1. Profeta e Data (Novo campo)
+        # 1. Profeta e Data
         profeta_data = item.get('profeta_data', 'Não informado')
         st.markdown(f"""
-        **Profeta e Data:** {profeta_data}
-        """)
+        <p class="detail-line">
+            <span class="detail-icon">📅</span> 
+            <b>Profeta e Data:</b> {profeta_data}
+        </p>
+        """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        
         # 2. Escrituras (Texto Fiel)
-        st.markdown("**📖 Escrituras (ARA):**")
+        st.markdown(f"""
+        <p class="detail-line">
+            <span class="detail-icon">📖</span> 
+            <b>Escrituras (ARA):</b>
+        </p>
+        """, unsafe_allow_html=True)
         st.info(f"_{item['escritura']}_")
         
-        st.markdown("---")
-
-        # 3. Análise Histórica
+        # 3. Análise (Dinâmica)
+        data_evento = item['data']
+        is_hist = is_historical_analysis(data_evento)
+        analise_titulo = "🌍 Análise Histórica" if is_hist else "🔮 Análise Hipotética"
+        
         st.markdown(f"""
-        **Análise Histórica:**
-        {item['historico']}
-        """)
+        <p class="detail-line">
+            <span class="detail-icon">{analise_titulo.split(' ')[0]}</span> 
+            <b>{analise_titulo.split(' ', 1)[1]}:</b>
+        </p>
+        """, unsafe_allow_html=True)
+        st.markdown(f"{item['historico']}")
+        
         
         if admin_mode:
             st.markdown("---")
@@ -495,7 +551,9 @@ def display_event(item, is_sub_event=False, admin_mode=False):
                         reset_edit_states()
                         st.rerun()
     
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True) # Fecha timeline-event-card
+
+# --- LÓGICA DE RENDERIZAÇÃO DA ÁRVORE ---
 
 # Organiza eventos em uma estrutura hierárquica (dicionário)
 eventos_por_parent = {}
@@ -505,38 +563,40 @@ for item in lista_eventos:
         eventos_por_parent[parent_id] = []
     eventos_por_parent[parent_id].append(item)
 
-# Ordena os eventos principais (parent_id é None)
-eventos_principais = sorted(eventos_por_parent.get(None, []), key=lambda x: get_sort_key(x['data']), reverse=True)
-
-# FUNÇÃO PARA VISUALIZAÇÃO RECURSIVA
-def render_event_tree(events, parent_id, is_sub_event):
+# FUNÇÃO PARA VISUALIZAÇÃO RECURSIVA DENTRO DA LINHA DO TEMPO
+def render_event_tree(events, parent_id):
     if parent_id in events:
         # Ordena os eventos filhos cronologicamente (crescente)
-        for item in sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False):
-            # Se o evento pai é None, ele é tratado como Título Principal (Capítulo)
-            display_event(item, is_sub_event, admin_mode) 
+        sorted_events = sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False)
+        
+        # Envolve todos os eventos cronológicos na classe timeline-container
+        st.markdown("<div class='timeline-container'>", unsafe_allow_html=True)
+        
+        for item in sorted_events:
+            # Renderiza o evento (que será um card na timeline)
+            display_event(item, is_sub_event=True, admin_mode=admin_mode) 
             
-            # Chama recursivamente para sub-eventos
+            # Se houver sub-eventos, eles continuarão dentro do mesmo timeline-container
             if item['id'] in events:
-                render_event_tree(events, item['id'], True)
+                # Chama recursivamente (a sub-recursão já está dentro do bloco pai)
+                render_event_tree(events, item['id']) 
+        
+        st.markdown("</div>", unsafe_allow_html=True) # Fecha timeline-container
         
 if not lista_eventos:
     st.info("O cronograma está vazio. Faça login para começar.")
 else:
-    # Renderiza a árvore, começando pelos eventos principais
-    
-    # 1. Renderiza Títulos (Eventos com parent_id=None)
+    # 1. Itera sobre os Títulos Principais (parent_id=None)
     for principal_event in eventos_por_parent.get(None, []):
-        # Renderiza o Título Principal (Capítulo)
-        st.markdown(f"## {principal_event['evento']}")
-        st.markdown("---")
         
-        # 2. Renderiza Eventos Filhos (Eventos cronológicos) do Título Principal
+        # Renderiza o Título Principal (Capítulo I, II, III...)
+        display_event(principal_event, is_sub_event=False, admin_mode=admin_mode)
+        
+        # 2. Renderiza Eventos Filhos (Cronológicos) deste Título Principal
         if principal_event['id'] in eventos_por_parent:
-            # Renderiza os filhos do Título Principal (estes são os Eventos Cronológicos)
-            render_event_tree(eventos_por_parent, principal_event['id'], False)
+            render_event_tree(eventos_por_parent, principal_event['id'])
         
-        st.markdown("---") # Separador após o fim do capítulo
+        st.markdown("<br>", unsafe_allow_html=True) # Espaçamento após o fim do capítulo
 
 # Rodapé
 st.markdown("---")
