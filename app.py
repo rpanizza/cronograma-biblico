@@ -3,7 +3,8 @@ import streamlit as st
 import pandas as pd
 import json
 import os
-from google import genai 
+# Importação do Google Generative AI (para uso futuro)
+# from google import genai 
 
 # Nome do arquivo onde os eventos serão salvos
 DATA_FILE = 'events.json'
@@ -160,6 +161,7 @@ def show_dashboard():
 
     st.markdown('</div>', unsafe_allow_html=True)
 
+
 # --- 4. Função de Login ---
 
 def show_login():
@@ -223,4 +225,38 @@ def show_admin_panel():
                 
                 events.append(new_event)
                 save_events(events)
-                st.success(f"Evento '{new_title}'
+                # LINHA CORRIGIDA AQUI: A f-string está completa e fechada
+                st.success(f"Evento '{new_title}' adicionado com sucesso!")
+                st.experimental_rerun()
+            else:
+                st.error("Por favor, preencha todos os campos para adicionar o evento.")
+    
+    st.markdown("---")
+    
+    # --- B. LISTAR/EDITAR/EXCLUIR EVENTOS (READ/UPDATE/DELETE) ---
+    st.subheader("📋 Eventos Atuais")
+    
+    if events:
+        events_df = pd.DataFrame(events)
+        # Exibe a tabela para visualização e edição
+        st.dataframe(events_df, use_container_width=True)
+        
+        # Placeholder para as funcionalidades de edição e exclusão
+        st.info("Funcionalidades de Edição e Exclusão serão implementadas abaixo da tabela.")
+
+    else:
+        st.warning("Nenhum evento cadastrado.")
+
+
+# --- 6. Controle de Páginas (Roteamento Principal) ---
+
+# Inicializa o estado da sessão (se não existir)
+if 'page' not in st.session_state:
+    st.session_state.page = 'dashboard'
+
+# Roteamento baseado no estado
+if st.session_state.page == 'dashboard':
+    show_dashboard()
+elif st.session_state.page == 'login':
+    show_login()
+elif st.session_state.page == 'admin' and st
