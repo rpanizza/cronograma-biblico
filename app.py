@@ -3,6 +3,7 @@ import google.generativeai as genai
 import json
 import os
 import re
+import uuid # Necessário para IDs únicos
 
 # --- CONFIGURAÇÃO INICIAL E VERSÕES ---
 st.set_page_config(
@@ -11,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Muda apenas quando o CÓDIGO muda
-VERSAO_APP = "1.1.2" 
-# Versão do Conteúdo (Cronologia) - Muda conforme a regra AA.MMDD.V
-VERSAO_CONTEUDO = "25.1208.6" 
+# Versão do Aplicativo (App) - Mudança estrutural grande
+VERSAO_APP = "1.2.0" 
+# Versão do Conteúdo (Cronologia)
+VERSAO_CONTEUDO = "25.1208.7" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -27,15 +28,10 @@ def get_sort_key(date_str):
     """Converte a data (ex: '539 a.C.') em um número para ordenação."""
     date_str_clean = date_str.lower().replace('.', '').strip()
     match = re.match(r'(\d+)\s*(a\.c\.|ac|d\.c\.|dc)?', date_str_clean)
-    
     if not match: return 0
-    
-    try:
-        year = int(match.group(1))
+    try: year = int(match.group(1))
     except ValueError: return 0 
-        
     suffix = match.group(2)
-    
     if suffix and ('a.c.' in suffix or 'ac' in suffix):
         return -year
     else:
@@ -51,8 +47,14 @@ def carregar_dados():
     with open(ARQUIVO_DADOS, 'r', encoding='utf-8') as f:
         try:
             conteudo = json.load(f)
-            if isinstance(conteudo, list):
-                return {"titulo": "📜 Cronograma Profético Dinâmico", "eventos": conteudo}
+            
+            # Garante que dados antigos tenham IDs únicos e parent_id
+            for event in conteudo.get("eventos", []):
+                if 'id' not in event:
+                    event['id'] = str(uuid.uuid4())
+                if 'parent_id' not in event:
+                    event['parent_id'] = None
+            
             return conteudo
         except json.JSONDecodeError:
             return dados_padrao
@@ -64,24 +66,14 @@ def salvar_dados(dados):
 # --- INTEGRAÇÃO COM GEMINI: CRONOLOGIA (STRICT + EMOJI) ---
 def consultar_gemini_cronologia(topico):
     if not API_KEY: return "⚠️ Erro: Chave API não configurada.", "", ""
-    
     genai.configure(api_key=API_KEY)
     model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
     Atue como assistente estrito de cronologia bíblica para preenchimento de banco de dados.
     Tópico: "{topico}"
-    
-    Sua tarefa é gerar TRÊS partes de texto:
-    1. UM ÚNICO EMOJI que melhor represente o tema do tópico.
-    2. Um breve fato histórico sobre o evento.
-    3. A referência bíblica e o texto da escritura integralmente.
-
-    REGRAS CRÍTICAS:
-    - O emoji deve ser o primeiro item, sem texto extra.
-    - Seja fiel *exclusivamente* às escrituras nas citações.
-    - NÃO use abreviações. NÃO adicione ponto de vista.
-    
+    Sua tarefa é gerar TRÊS partes: 1. UM ÚNICO EMOJI. 2. Fato histórico. 3. Referência e texto da escritura integralmente.
+    REGRAS CRÍTICAS: O emoji deve ser o primeiro item, sem texto extra. Use FORMATO OBRIGATÓRIO.
     FORMATO OBRIGATÓRIO: [EMOJI] ||| [Fato Histórico] ||| [Referência e Texto Bíblico]
     """
     try:
@@ -89,10 +81,7 @@ def consultar_gemini_cronologia(topico):
         texto = response.text
         if texto.count("|||") == 2:
             partes = texto.split("|||")
-            emoji = partes[0].strip()
-            hist = partes[1].strip()
-            bib = partes[2].strip()
-            return emoji, hist, bib
+            return partes[0].strip(), partes[1].strip(), partes[2].strip()
         else:
             return "❓", texto, "Não foi possível separar. Verifique o texto."
     except Exception as e:
@@ -117,19 +106,40 @@ def consultar_gemini_research(topico, model_name):
     except Exception as e:
         return f"Erro ao executar pesquisa com {model_name}: {str(e)}"
 
+# --- LÓGICA DE ESTADO E SAÍDA DE EDIÇÃO ---
+
+def reset_edit_states():
+    """Limpa todos os estados temporários de edição e adição."""
+    for key in ['edit_index', 'temp_hist', 'temp_bib', 'temp_evento', 'research_output', 'research_topic', 'show_add_form']:
+        if key in st.session_state:
+            del st.session_state[key]
+    # Não limpa a senha para o usuário poder re-entrar sem digitar novamente
+
+def has_unsaved_changes():
+    """Verifica se há conteúdo sendo editado ou adicionado no formulário."""
+    return (st.session_state.edit_index is not None or
+            st.session_state.get('temp_hist', '') or 
+            st.session_state.get('temp_bib', '') or
+            st.session_state.get('temp_evento', '') or
+            st.session_state.get('show_add_form', False))
 
 # --- INICIALIZAÇÃO DE ESTADO E CSS ---
 if 'edit_index' not in st.session_state: st.session_state['edit_index'] = None
 if 'research_topic' not in st.session_state: st.session_state['research_topic'] = ""
 if 'research_output' not in st.session_state: st.session_state['research_output'] = ""
 if 'admin_pass_input' not in st.session_state: st.session_state['admin_pass_input'] = ""
-    
+if 'show_add_form' not in st.session_state: st.session_state['show_add_form'] = False
+
 st.markdown("""
 <style>
-    @media (max-width: 600px) {
-        h1 { font-size: 1.8rem !important; }
-    }
+    @media (max-width: 600px) { h1 { font-size: 1.8rem !important; } }
     p { text-align: justify; }
+    /* Estilo para indentação de sub-eventos */
+    .sub-event-card {
+        padding-left: 20px;
+        margin-top: 5px;
+        border-left: 3px solid #f0f2f6; /* Cor da borda para visual de árvore */
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -146,7 +156,7 @@ admin_mode = (password_input == SENHA_CORRETA)
 
 st.title(titulo_atual)
 
-# LAYOUT DA VERSÃO (Otimizado para espaçamento)
+# LAYOUT DA VERSÃO
 st.markdown(f"""
 <div style='line-height: 1.2; margin-bottom: 1rem;'>
     <p style='margin: 0; font-size: 0.95em;'>
@@ -163,7 +173,7 @@ st.markdown(f"""
 
 st.caption("Toque nos itens abaixo para expandir e ler.")
 
-# --- BARRA LATERAL (ADMIN E BACKUP) ---
+# --- BARRA LATERAL (ADMIN E SAÍDA) ---
 with st.sidebar:
     st.header("⚙️ Ferramentas")
     
@@ -173,6 +183,29 @@ with st.sidebar:
 
     if admin_mode:
         st.success("✅ Modo Edição Ativo")
+        st.divider()
+        
+        # BOTÃO SAIR DO MODO EDIÇÃO
+        if st.button("🚪 Sair do Modo Edição", key='exit_admin_btn'):
+            if has_unsaved_changes():
+                st.session_state['confirm_exit'] = True
+            else:
+                # Limpa a senha para sair do modo admin
+                st.session_state['admin_pass_input'] = '' 
+                reset_edit_states()
+        
+        # CONFIRMAÇÃO DE SAÍDA
+        if st.session_state.get('confirm_exit', False):
+            st.warning("⚠️ Você possui conteúdo não salvo (edição ou adição em andamento)! Se sair, perderá o conteúdo.")
+            col_confirm, col_cancel = st.columns(2)
+            if col_confirm.button("Confirmar Saída (Perder Dados)"):
+                st.session_state['admin_pass_input'] = ''
+                st.session_state['confirm_exit'] = False
+                reset_edit_states()
+            if col_cancel.button("Cancelar Saída"):
+                st.session_state['confirm_exit'] = False
+                st.rerun()
+
         st.divider()
         st.subheader("Personalizar")
         novo_titulo = st.text_input("Título do Projeto", value=titulo_atual)
@@ -195,7 +228,7 @@ with st.sidebar:
         if st.session_state.edit_index is not None:
              if st.button("❌ Cancelar Edição"):
                 st.session_state.edit_index = None
-                st.rerun()
+                reset_edit_states()
             
     st.divider()
     st.caption(f"App v{VERSAO_APP} | Conteúdo v{VERSAO_CONTEUDO}")
@@ -213,16 +246,46 @@ if admin_mode:
     evento_padrao = item_editado['evento'] if item_editado else ""
     hist_padrao = item_editado['historico'] if item_editado else ""
     bib_padrao = item_editado['escritura'] if item_editado else ""
+    parent_id_padrao = item_editado.get('parent_id') if item_editado else None
     submit_label = f"✅ Atualizar Evento {data_padrao}" if item_editado else "💾 Salvar Novo Evento"
 
+    # Criar lista de Eventos Principais (para o selectbox Pai)
+    eventos_principais_options = [
+        {"evento": "Nenhum (Evento Principal/Raiz)", "id": None}
+    ]
+    
+    # Adiciona todos os eventos para que sub-eventos também possam ser pais
+    for event in lista_eventos:
+        # Garante que não possa ser pai de si mesmo
+        if not item_editado or event['id'] != item_editado.get('id'):
+            eventos_principais_options.append({"evento": f"{event['data']} - {event['evento']}", "id": event['id']})
+
+    # Encontra o índice padrão para o selectbox
+    parent_default_index = 0
+    if parent_id_padrao:
+        for i, option in enumerate(eventos_principais_options):
+            if option['id'] == parent_id_padrao:
+                parent_default_index = i
+                break
+    
+    
     with st.expander(form_titulo, expanded=(item_editado is not None or st.session_state.get('show_add_form', False))):
         st.write("Use a IA para buscar textos ou preencha manualmente.")
         
+        # SELECTBOX PARA EVENTO PAI
+        parent_selection = st.selectbox(
+            "Escolha o Evento Pai (Árvore de Estudo)",
+            options=[opt['evento'] for opt in eventos_principais_options],
+            index=parent_default_index
+        )
+        # Encontra o ID do evento pai selecionado
+        parent_id_final = next(item['id'] for item in eventos_principais_options if item['evento'] == parent_selection)
+        
         col_input1, col_input2 = st.columns([1, 2])
         with col_input1:
-            data_temp = st.text_input("Data (ex: 539 a.C.)", key="in_data", value=data_padrao)
+            data_temp = st.text_input("Data (ex: 08/12/25)", key="in_data", value=data_padrao)
         with col_input2:
-            evento_temp = st.text_input("Nome do Evento", key="in_evento", value=evento_padrao)
+            evento_temp = st.text_input("Tópico para IA", key="in_evento_ia", value=evento_padrao) # Novo campo para IA
             
         if st.button("✨ Pesquisar Cronologia (Fiel) com IA"):
             if evento_temp:
@@ -245,32 +308,35 @@ if admin_mode:
         
         with st.form("form_salvar"):
             # O campo de nome de evento é preenchido com o emoji + texto
-            evento_final = st.text_input("Nome do Evento", value=val_evento, key="final_evento")
+            evento_final = st.text_input("Nome/Título Final do Evento (Com Emoji)", value=val_evento, key="final_evento")
             txt_historico = st.text_area("Fato Histórico", value=val_hist, height=150)
             txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=200) 
             
             if st.form_submit_button(submit_label):
                 novo_item = {
+                    "id": item_editado['id'] if item_editado else str(uuid.uuid4()),
+                    "parent_id": parent_id_final,
                     "data": data_temp,
-                    "evento": evento_final, # Usa o campo final_evento
+                    "evento": evento_final,
                     "historico": txt_historico,
                     "escritura": txt_biblico
                 }
                 
                 if item_editado is not None:
-                    lista_eventos[st.session_state.edit_index] = novo_item
+                    # Modo Edição: Substitui
+                    idx = lista_eventos.index(item_editado)
+                    lista_eventos[idx] = novo_item
                     st.session_state.edit_index = None
                     st.success("Evento atualizado com sucesso!")
                 else:
+                    # Modo Adição: Adiciona
                     lista_eventos.append(novo_item)
                     st.success("Evento salvo com sucesso!")
                     
                 dados_app["eventos"] = lista_eventos
                 salvar_dados(dados_app)
-                # Limpa estados temporários, inclusive o do evento/emoji
-                st.session_state['temp_hist'] = ""
-                st.session_state['temp_bib'] = ""
-                st.session_state['temp_evento'] = "" 
+                # Limpa estados temporários
+                reset_edit_states()
                 st.rerun()
 
     st.divider()
@@ -278,10 +344,12 @@ if admin_mode:
     # --- FERRAMENTA DE PESQUISA GEMINI ---
     with st.expander("🔬 Ferramenta de Estudo e Pesquisa (Gemini)", expanded=False):
         
+        # ... (código da pesquisa Gemini mantido, apenas o campo de texto foi ajustado)
+        
         def clear_research():
+            # Limpa apenas os estados de pesquisa, não afeta o formulário de adição/edição
             st.session_state.research_topic = ""
             st.session_state.research_output = ""
-            st.session_state.edit_index = None
             st.rerun()
 
         st.subheader("Pesquisa Rápida e Raciocínio Profundo")
@@ -296,7 +364,6 @@ if admin_mode:
             model_key = 'gemini-1.5-flash' if 'flash' in model_selected else 'gemini-1.5-pro'
         
         with col_topic:
-            # Aumento do campo de descrição do prompt - Height=200
             st.session_state.research_topic = st.text_area(
                 "Tópico de Pesquisa/Estudo", 
                 key='topic_input', 
@@ -323,7 +390,6 @@ if admin_mode:
             
             if st.button("📝 Salvar Resultado no Cronograma"):
                 output = st.session_state.research_output
-                # Regex para extrair Histórico e Escritura do resultado de pesquisa flexível
                 hist_match = re.search(r'1\. HISTÓRICO/CONTEXTO(.*?)2\. ESCRITURAS RELACIONADAS', output, re.DOTALL)
                 bib_match = re.search(r'2\. ESCRITURAS RELACIONADAS(.*)', output, re.DOTALL)
                 
@@ -332,53 +398,91 @@ if admin_mode:
                 
                 st.session_state['temp_hist'] = hist_temp
                 st.session_state['temp_bib'] = bib_temp
+                st.session_state['temp_evento'] = st.session_state.research_topic # Usa o tópico de pesquisa como nome
                 st.session_state['show_add_form'] = True 
                 
-                # Não preenche emoji aqui, mas força a abertura do formulário
-                st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Preencha a Data, o Evento (com emoji, se desejar) e salve.")
+                st.success("Resultado transferido para o formulário 'Adicionar Novo Evento'. Revise a Data, o Título e o Evento Pai.")
                 st.rerun()
 
 # --- ÁREA DE VISUALIZAÇÃO (LINHA DO TEMPO) ---
 st.divider()
 
+def display_event(item, is_sub_event=False, admin_mode=False):
+    """Função recursiva para exibir eventos e sub-eventos."""
+    
+    # Aplica indentação para sub-eventos
+    container_class = "sub-event-card" if is_sub_event else ""
+    
+    # Adiciona uma div de controle para aplicar o CSS
+    st.markdown(f"<div class='{container_class}'>", unsafe_allow_html=True)
+    
+    titulo_prefix = "🔗 " if is_sub_event else "🗓️ "
+    titulo_card = f"{titulo_prefix} **{item['data']}** — {item['evento']}"
+    
+    with st.expander(titulo_card):
+        st.markdown(f"""
+        **Contexto Histórico:**
+        {item['historico']}
+        """)
+        
+        st.markdown("---")
+        
+        st.markdown("**📖 Escrituras (Texto Fiel):**")
+        st.info(f"_{item['escritura']}_")
+        
+        if admin_mode:
+            col_edit, col_delete = st.columns([1, 1])
+            
+            if col_edit.button("✏️ Editar", key=f"edit_{item['id']}"):
+                # Encontra o índice na lista não-ordenada usando o ID
+                for i, evt in enumerate(lista_eventos):
+                    if evt['id'] == item['id']:
+                        st.session_state.edit_index = i
+                        break
+                st.session_state['show_add_form'] = True
+                st.rerun()
+
+            with col_delete:
+                if st.checkbox("Confirmar Exclusão", key=f"check_del_{item['id']}"):
+                    if st.button("🗑️ Excluir permanentemente", key=f"del_{item['id']}"):
+                        # Remove o item pelo ID
+                        global lista_eventos
+                        lista_eventos = [e for e in lista_eventos if e['id'] != item['id']]
+                        dados_app["eventos"] = lista_eventos
+                        salvar_dados(dados_app)
+                        reset_edit_states()
+                        st.rerun()
+    
+    # Fecha a div de controle
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# Organiza eventos em uma estrutura hierárquica (dicionário)
+eventos_por_parent = {}
+for item in lista_eventos:
+    parent_id = item.get('parent_id') or None
+    if parent_id not in eventos_por_parent:
+        eventos_por_parent[parent_id] = []
+    eventos_por_parent[parent_id].append(item)
+
+# Ordena os eventos principais (parent_id é None)
+eventos_principais = sorted(eventos_por_parent.get(None, []), key=lambda x: get_sort_key(x['data']), reverse=True)
+
+# FUNÇÃO PARA VISUALIZAÇÃO RECURSIVA
+def render_event_tree(events, parent_id, is_sub_event):
+    if parent_id in events:
+        for item in sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False):
+            display_event(item, is_sub_event, admin_mode)
+            # Chama recursivamente para sub-eventos
+            if item['id'] in events:
+                render_event_tree(events, item['id'], True)
+        
 if not lista_eventos:
     st.info("O cronograma está vazio. Faça login para começar.")
 else:
-    eventos_ordenados = sorted(lista_eventos, key=lambda x: get_sort_key(x['data']), reverse=True)
+    # Renderiza a árvore, começando pelos eventos principais
+    render_event_tree(eventos_por_parent, None, False)
 
-    for i, item in enumerate(eventos_ordenados):
-        # O título já inclui o emoji se ele foi adicionado no evento
-        titulo_card = f"🗓️ **{item['data']}** — {item['evento']}"
-        
-        with st.expander(titulo_card):
-            st.markdown(f"""
-            **Contexto Histórico:**
-            {item['historico']}
-            """)
-            
-            st.markdown("---")
-            
-            st.markdown("**📖 Escrituras (Texto Fiel):**")
-            st.info(f"_{item['escritura']}_")
-            
-            if admin_mode:
-                col_edit, col_delete = st.columns([1, 1])
-                
-                if col_edit.button("✏️ Editar", key=f"edit_{i}"):
-                    original_index = lista_eventos.index(item)
-                    st.session_state.edit_index = original_index
-                    st.session_state['show_add_form'] = True
-                    st.rerun()
-
-                with col_delete:
-                    if st.checkbox("Confirmar Exclusão", key=f"check_del_{i}"):
-                        if st.button("🗑️ Excluir permanentemente", key=f"del_{i}"):
-                            lista_eventos.remove(item)
-                            dados_app["eventos"] = lista_eventos
-                            salvar_dados(dados_app)
-                            st.session_state.edit_index = None 
-                            st.rerun()
 
 # Rodapé
 st.markdown("---")
-st.caption(f"App v{VERSAO_APP} | Conteúdo v{VERSAO_CONTEUDO}")
+st.caption("Fim do Cronograma.")
