@@ -12,10 +12,10 @@ st.set_page_config(
     initial_sidebar_state="auto"
 )
 
-# Versão do Aplicativo (App) - Correção da API Gemini e UX do Prompt
-VERSAO_APP = "1.2.2" 
+# Versão do Aplicativo (App) - Ajuste de formatação e UX da hierarquia
+VERSAO_APP = "1.2.3" 
 # Versão do Conteúdo (Cronologia)
-VERSAO_CONTEUDO = "25.1208.9" 
+VERSAO_CONTEUDO = "25.1208.10" 
 
 # Nome do arquivo onde os dados serão salvos
 ARQUIVO_DADOS = 'cronograma.json'
@@ -144,6 +144,13 @@ st.markdown("""
         padding-left: 20px;
         margin-top: 5px;
         border-left: 3px solid #f0f2f6; /* Cor da borda para visual de árvore */
+    }
+    .main-event-title {
+        font-size: 1.15em;
+        font-weight: bold;
+        margin-top: 10px;
+        margin-bottom: 5px;
+        color: #004d40; /* Cor para destacar títulos principais */
     }
 </style>
 """, unsafe_allow_html=True)
@@ -314,8 +321,20 @@ if admin_mode:
         with st.form("form_salvar"):
             # O campo de nome de evento é preenchido com o emoji + texto
             evento_final = st.text_input("Nome/Título Final do Evento (Com Emoji)", value=val_evento, key="final_evento")
-            txt_historico = st.text_area("Fato Histórico", value=val_hist, height=150)
-            txt_biblico = st.text_area("Texto das Escrituras (Fiel)", value=val_bib, height=200) 
+            txt_historico = st.text_area("Análise Histórica", value=val_hist, height=150) # Título ajustado
+            txt_biblico = st.text_area("Escrituras (Texto Fiel)", value=val_bib, height=200) # Título ajustado
+            
+            # Novo campo para Profeta/Data de escrita (que era extraído da análise histórica antes)
+            profeta_padrao = "" 
+            # Tentativa simples de extrair o profeta da análise, se não estiver editando
+            if not item_editado and "Profeta e Data" in val_hist:
+                 # Esta é uma complexidade desnecessária para o código principal,
+                 # O usuário pode preencher este campo manualmente. 
+                 pass
+
+            txt_profeta_data = st.text_input("Profeta e Data de Escrita (Ex: Isaías c. 700 a.C.)", 
+                                             value=item_editado.get('profeta_data', '') if item_editado else "", 
+                                             key="profeta_data_input")
             
             if st.form_submit_button(submit_label):
                 novo_item = {
@@ -324,7 +343,8 @@ if admin_mode:
                     "data": data_temp,
                     "evento": evento_final,
                     "historico": txt_historico,
-                    "escritura": txt_biblico
+                    "escritura": txt_biblico,
+                    "profeta_data": txt_profeta_data # Salva o novo campo
                 }
                 
                 if item_editado is not None:
@@ -355,7 +375,7 @@ if admin_mode:
         with col_model:
             model_selected = st.selectbox(
                 "Escolha o Modelo",
-                options=['gemini-2.5-flash (Rápido/Padrão)', 'gemini-2.5-pro (Raciocínio Pro)'], # Nomes atualizados
+                options=['gemini-2.5-flash (Rápido/Padrão)', 'gemini-2.5-pro (Raciocínio Pro)'], 
                 key='model_selection'
             )
             model_key = 'gemini-2.5-flash' if 'flash' in model_selected else 'gemini-2.5-pro'
@@ -365,7 +385,7 @@ if admin_mode:
             "Digite seu prompt de estudo ou veja o resultado da IA aqui:", 
             key='research_input', 
             value=st.session_state.research_input,
-            height=350 # Campo aumentado
+            height=350 
         )
 
         col_run_ai, col_clear = st.columns([1, 1])
@@ -396,7 +416,6 @@ if admin_mode:
             hist_temp = hist_match.group(1).strip() if hist_match else output
             bib_temp = bib_match.group(1).strip() if bib_match else "Texto bíblico não separado, por favor, revise manualmente."
             
-            # Define o primeiro parágrafo como título temporário
             title_match = re.match(r'#+\s*(.*?)\n', output)
             temp_title = title_match.group(1).strip() if title_match else "Resultado da Pesquisa (Ajustar Título)"
 
@@ -413,33 +432,53 @@ st.divider()
 
 def display_event(item, is_sub_event=False, admin_mode=False):
     """Função recursiva para exibir eventos e sub-eventos."""
-    global lista_eventos # CORREÇÃO: Colocado no início da função
+    global lista_eventos 
+    
+    # Se for um Título Principal (is_sub_event=False e não tem parent_id), formata diferente.
+    if item.get('parent_id') is None and not is_sub_event:
+        # Título Principal (Capítulo)
+        st.markdown(f"<div class='main-event-title'>{item['evento']}</div>", unsafe_allow_html=True)
+        # O título principal não expande, ele serve apenas como agrupador visual.
+        # Se você quiser que o título principal seja um expander, teria que aninhar os eventos filhos aqui.
+        return # Não processa os detalhes do evento raiz no corpo principal
+
+    # --- FORMATO DOS EVENTOS CRONOLÓGICOS ---
     
     # Aplica indentação para sub-eventos
     container_class = "sub-event-card" if is_sub_event else ""
     
-    # Adiciona uma div de controle para aplicar o CSS
     st.markdown(f"<div class='{container_class}'>", unsafe_allow_html=True)
     
-    titulo_prefix = "🔗 " if is_sub_event else "🗓️ "
-    titulo_card = f"{titulo_prefix} **{item['data']}** — {item['evento']}"
+    # O evento é o título com a data: "959 a.C. A Dedicação do Primeiro Templo"
+    titulo_card = f"🗓️ **{item['data']}** — {item['evento']}" 
     
     with st.expander(titulo_card):
+        
+        # 1. Profeta e Data (Novo campo)
+        profeta_data = item.get('profeta_data', 'Não informado')
         st.markdown(f"""
-        **Contexto Histórico:**
+        **Profeta e Data:** {profeta_data}
+        """)
+
+        st.markdown("---")
+        
+        # 2. Escrituras (Texto Fiel)
+        st.markdown("**📖 Escrituras (ARA):**")
+        st.info(f"_{item['escritura']}_")
+        
+        st.markdown("---")
+
+        # 3. Análise Histórica
+        st.markdown(f"""
+        **Análise Histórica:**
         {item['historico']}
         """)
         
-        st.markdown("---")
-        
-        st.markdown("**📖 Escrituras (Texto Fiel):**")
-        st.info(f"_{item['escritura']}_")
-        
         if admin_mode:
+            st.markdown("---")
             col_edit, col_delete = st.columns([1, 1])
             
             if col_edit.button("✏️ Editar", key=f"edit_{item['id']}"):
-                # Encontra o índice na lista não-ordenada usando o ID
                 for i, evt in enumerate(lista_eventos):
                     if evt['id'] == item['id']:
                         st.session_state.edit_index = i
@@ -450,14 +489,12 @@ def display_event(item, is_sub_event=False, admin_mode=False):
             with col_delete:
                 if st.checkbox("Confirmar Exclusão", key=f"check_del_{item['id']}"):
                     if st.button("🗑️ Excluir permanentemente", key=f"del_{item['id']}"):
-                        # Remove o item pelo ID
                         lista_eventos = [e for e in lista_eventos if e['id'] != item['id']]
                         dados_app["eventos"] = lista_eventos
                         salvar_dados(dados_app)
                         reset_edit_states()
                         st.rerun()
     
-    # Fecha a div de controle
     st.markdown("</div>", unsafe_allow_html=True)
 
 # Organiza eventos em uma estrutura hierárquica (dicionário)
@@ -474,8 +511,11 @@ eventos_principais = sorted(eventos_por_parent.get(None, []), key=lambda x: get_
 # FUNÇÃO PARA VISUALIZAÇÃO RECURSIVA
 def render_event_tree(events, parent_id, is_sub_event):
     if parent_id in events:
+        # Ordena os eventos filhos cronologicamente (crescente)
         for item in sorted(events[parent_id], key=lambda x: get_sort_key(x['data']), reverse=False):
-            display_event(item, is_sub_event, admin_mode)
+            # Se o evento pai é None, ele é tratado como Título Principal (Capítulo)
+            display_event(item, is_sub_event, admin_mode) 
+            
             # Chama recursivamente para sub-eventos
             if item['id'] in events:
                 render_event_tree(events, item['id'], True)
@@ -484,8 +524,19 @@ if not lista_eventos:
     st.info("O cronograma está vazio. Faça login para começar.")
 else:
     # Renderiza a árvore, começando pelos eventos principais
-    render_event_tree(eventos_por_parent, None, False)
-
+    
+    # 1. Renderiza Títulos (Eventos com parent_id=None)
+    for principal_event in eventos_por_parent.get(None, []):
+        # Renderiza o Título Principal (Capítulo)
+        st.markdown(f"## {principal_event['evento']}")
+        st.markdown("---")
+        
+        # 2. Renderiza Eventos Filhos (Eventos cronológicos) do Título Principal
+        if principal_event['id'] in eventos_por_parent:
+            # Renderiza os filhos do Título Principal (estes são os Eventos Cronológicos)
+            render_event_tree(eventos_por_parent, principal_event['id'], False)
+        
+        st.markdown("---") # Separador após o fim do capítulo
 
 # Rodapé
 st.markdown("---")
