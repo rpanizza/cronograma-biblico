@@ -67,7 +67,6 @@ timeline_css()
 ADMIN_PASSWORD = "R$Masterkey01" 
 
 # --- DADOS INICIAIS (Modelo Aninhado) ---
-# ATENÇÃO: É crucial que cada evento tenha um 'id' único.
 DADOS_INICIAIS = [
     {
         "secao": "I. OS PRIMEIROS TEMPLOS E O EXÍLIO",
@@ -164,9 +163,8 @@ def exibir_evento(evento, show_line=True):
     """Renderiza o evento principal e o expander abaixo dele."""
     
     # ----------------------------------------------------
-    # CORREÇÃO ROBUSTA DA CHAVE (Tratamento de Strings e Tipo)
+    # CHAVE ROBUSTA (Mantida da correção anterior)
     # ----------------------------------------------------
-    # Obtém as strings de identificação
     evento_id = evento.get('id')
     data_principal = str(evento.get('data_principal', 'n/a'))
     titulo_evento = str(evento.get('titulo_evento', 'n/a'))
@@ -174,9 +172,7 @@ def exibir_evento(evento, show_line=True):
     if evento_id and isinstance(evento_id, str):
         expander_key = f"pub_exp_{evento_id}"
     else:
-        # Se 'id' não existir ou não for string, cria uma chave determinística
         unique_str = f"{data_principal}-{titulo_evento}"
-        # Usa um hash do conteúdo para garantir a unicidade e o tipo string
         expander_key = f"pub_exp_fallback_{hashlib.sha1(unique_str.encode('utf-8')).hexdigest()}"
     # ----------------------------------------------------
     
@@ -193,7 +189,6 @@ def exibir_evento(evento, show_line=True):
         st.markdown(f'<p class="event-title">{evento["data_principal"]} | {evento["titulo_evento"]}</p>', unsafe_allow_html=True)
     
     # Expander de Detalhes (abaixo do evento, ocupando toda a largura)
-    # A variável expander_key agora é garantidamente uma string única.
     with st.expander(label="▶️", expanded=False, key=expander_key):
         st.subheader("Detalhes: Fatos, Profecias e Análises Correlacionadas")
         for fato in evento['fatos']:
@@ -233,7 +228,11 @@ def exibir_cronograma():
             st.header(secao)
             st.markdown("---")
         
-        for i, evento in enumerate(st.session_state.cronograma[0]['eventos']): # ATENÇÃO: Corrigido loop incorreto que estava causando erros seções
+        # ------------------------------------------------------------------
+        # CORREÇÃO DA LÓGICA: Iterar sobre os eventos da seção ATUAL.
+        # ------------------------------------------------------------------
+        # Antes: for i, evento in enumerate(st.session_state.cronograma[0]['eventos']): 
+        for i, evento in enumerate(secao_data['eventos']): 
             show_line = i < len(secao_data['eventos']) - 1 
             exibir_evento(evento, show_line)
             st.markdown("<br>")
