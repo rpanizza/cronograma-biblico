@@ -1,9 +1,9 @@
 # app.py
 import streamlit as st
 import pandas as pd
+import os 
 # Importação do Google Generative AI (para uso futuro)
 # from google import genai 
-import os # Necessário para autenticação simulada
 
 # --- 1. Configuração Inicial e Estilo Customizado (Timeline) ---
 
@@ -75,7 +75,6 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # --- 2. Dados de Exemplo (Hardcoded) ---
-# Em um app real, este seria o resultado da busca no banco de dados.
 data = {
     'date': ['0 (Criação)', 'c. 2000 A.C.', 'c. 1446 A.C.', 'c. 0', 'Futuro'],
     'title': ['O Princípio', 'Aliança Abraâmica', 'Êxodo do Egito', 'O Cristo', 'A Nova Terra'],
@@ -117,4 +116,30 @@ def show_dashboard(events):
     
     # Renderiza os eventos
     for index, event in events.iterrows():
-        html_item =
+        # INÍCIO DA CORREÇÃO: Envolvendo a atribuição em parênteses
+        html_item = (
+            f"""
+            <div class="timeline-item">
+                <div class="timeline-date">{event['date']}</div>
+                <div class="timeline-content">
+                    <h3 class="timeline-title">{event['title']}</h3>
+                    <p class="timeline-description">{event['description']}</p>
+                </div>
+            </div>
+            """
+        )
+        # FIM DA CORREÇÃO
+        st.markdown(html_item, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# --- 4. Função de Login ---
+
+def show_login():
+    st.title("🔑 Login Administrador")
+    
+    with st.form("login_form"):
+        username = st.text_input("Usuário")
+        password = st.text_input("Senha", type="password")
+        submitted = st.form_submit_button
