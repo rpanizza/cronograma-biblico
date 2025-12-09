@@ -1,179 +1,111 @@
 import streamlit as st
-import pandas as pd
 import json
-import os
-from datetime import datetime
+import uuid
+import requests
 
-# --- Configurações Iniciais ---
-st.set_page_config(layout="wide", page_title="Cronograma Bíblico: Esfera em Destaque")
+# ==============================
+# CONFIGURAÇÕES DO APP
+# ==============================
+st.set_page_config(page_title="Estudo Bíblico Profético", layout="wide")
 
-# Nome do arquivo de dados
-DATA_FILE = "cronograma_data.json"
-
-# --- Funções de Persistência (Mantidas da V10.0) ---
-
-def carregar_dados():
-    """Carrega dados do arquivo JSON ou retorna dados vazios/exemplo se o arquivo não existir."""
-    if os.path.exists(DATA_FILE) and os.path.getsize(DATA_FILE) > 0:
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return criar_dados_exemplo()
-    return criar_dados_exemplo()
-
-def salvar_dados(dados):
-    """Salva a lista de dados no arquivo JSON."""
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(dados, f, indent=4, ensure_ascii=False)
-    st.rerun()
-
-def criar_dados_exemplo():
-    """Cria dados de exemplo para inicialização."""
-    return [
-        {
-            "id_pai": "0025.00.00.1", "data_pai": "2025 A.C.", "evento_pai": "O Dilúvio Universal",
-            "id_sub": None, "cor": "red", "referencia": "Gênesis 6-9",
-        },
-        {
-            "id_pai": "2011.03.00.1", "data_pai": "2011 D.C.", "evento_pai": "Agitação no Oriente Médio",
-            "id_sub": None, "cor": "blue", "referencia": "Mateus 24:6-7",
-        },
-        {
-            "id_pai": "3000.01.01.1", "data_pai": "Futuro (Indefinido)", "evento_pai": "Reconstrução do Templo",
-            "id_sub": None, "cor": "green", "referencia": "Daniel 9:27",
-        },
-        {
-            "id_pai": "3000.02.01.1", "data_pai": "Futuro (Breve)", "evento_pai": "Gogue e Magogue",
-            "id_sub": None, "cor": "orange", "referencia": "Ezequiel 38-39",
-        }
-    ]
-
-def gerar_novo_id(data_str):
-    """Gera um ID único baseado na data e na versão atual."""
+# Função para carregar dados
+def load_data():
     try:
-        if data_str.lower() in ["futuro", "indefinido", "futuro (indefinido)", "futuro (breve)"]:
-             prefix = f"3999.12.31."
-        elif "a.c." in data_str.lower():
-            ano = int(data_str.lower().replace(" a.c.", "").strip())
-            prefix = f"{ano:04d}.00.00." 
+        with open("data.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+# Função para salvar dados
+def save_data(data):
+    with open("data.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+# ==============================
+# LOGIN
+# ==============================
+def login():
+    st.sidebar.title("Login do Administrador")
+    user = st.sidebar.text_input("Usuário")
+    password = st.sidebar.text_input("Senha", type="password")
+    if st.sidebar.button("Entrar"):
+        if user == "admin" and password == "1234":  # exemplo simples
+            st.session_state["auth"] = True
         else:
-            if "/" in data_str:
-                dt = datetime.strptime(data_str, "%Y/%m/%d")
-            elif len(data_str) == 4 and data_str.isdigit():
-                dt = datetime.strptime(data_str, "%Y")
-            else:
-                dt = datetime.strptime(data_str, "%Y")
-            prefix = dt.strftime("%Y.%m.%d.")
-    except ValueError:
-        prefix = "9999.00.00." 
-        
-    df = pd.DataFrame(st.session_state.cronograma_data)
-    if not df.empty:
-        max_id = df[df['id_pai'].str.startswith(prefix)].apply(lambda x: x['id_pai'].split('.')[-1], axis=1).astype(int).max()
-        nova_versao = (max_id if pd.notna(max_id) else 0) + 1
+            st.sidebar.error("Usuário ou senha inválidos")
+
+# ==============================
+# GEMINI INTEGRAÇÃO
+# ==============================
+def gemini_query(prompt, token):
+    url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    headers = {"Authorization": f"Bearer {token}"}
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}]
+    }
+    response = requests.post(url, headers=headers, json=body)
+    if response.status_code == 200:
+        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
     else:
-        nova_versao = 1
-        
-    return prefix + str(nova_versao)
+        return f"Erro: {response.text}"
 
+# ==============================
+# INTERFACE PRINCIPAL
+# ==============================
+def main():
+    if "auth" not in st.session_state:
+        st.session_state["auth"] = False
 
-# --- Inicialização do Estado ---
-if 'cronograma_data' not in st.session_state:
-    st.session_state.cronograma_data = carregar_dados()
+    if not st.session_state["auth"]:
+        login()
+        return
 
-df_full = pd.DataFrame(st.session_state.cronograma_data)
-eventos_pai = df_full[df_full['evento_pai'].notna()].sort_values(by='id_pai', ascending=False)
+    st.title("📖 Estudo Bíblico Profético")
+    data = load_data()
 
-# --- CSS NOVO LAYOUT: ESFERA EM DESTAQUE ---
-TIMELINE_CSS = """
-<style>
-/* ------------------------------------- */
-/* --- NOVO ESTILO: ESFERA DE DESTAQUE --- */
-/* ------------------------------------- */
+    # Timeline
+    st.subheader("Timeline Profética")
+    for ano, eventos in sorted(data.items()):
+        st.markdown(f"### 📅 {ano}")
+        for evento in eventos:
+            st.markdown(f"- **Evento:** {evento['titulo']} (ID: {evento['id']})")
+            if "descricao" in evento:
+                st.write(f"Descrição: {evento['descricao']}")
+            if "profecias" in evento:
+                st.write(f"Profecias: {', '.join(evento['profecias'])}")
+            if "analises" in evento:
+                st.write(f"Análises: {', '.join(evento['analises'])}")
 
-/* Ponto de Destaque (Principal) */
-.timeline-sphere {
-    width: 30px; /* Maior para o efeito 3D */
-    height: 30px;
-    border-radius: 50%;
-    position: relative;
-    top: 5px; /* Alinha com o início do cartão */
-    left: -15px; /* Ajuste para o centro da coluna visual */
-    
-    /* Efeito de Esfera/Brilho (Gradient para profundidade) */
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    
-    z-index: 10;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
+    # Área de administração
+    st.subheader("Gerenciar Cronograma")
+    ano = st.text_input("Ano do evento")
+    titulo = st.text_input("Título do evento")
+    descricao = st.text_area("Descrição")
+    profecias = st.text_area("Profecias (separadas por vírgula)")
+    analises = st.text_area("Análises (separadas por vírgula)")
 
-/* Pseudo-elemento para o ÍCONE (Centralizado) */
-.timeline-sphere::after {
-    content: "✝️"; 
-    font-size: 14px; /* Ícone maior */
-    line-height: 1; 
-    color: white; 
-    text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
-}
+    if st.button("Adicionar Evento"):
+        novo_evento = {
+            "id": str(uuid.uuid4()),
+            "titulo": titulo,
+            "descricao": descricao,
+            "profecias": [p.strip() for p in profecias.split(",") if p.strip()],
+            "analises": [a.strip() for a in analises.split(",") if a.strip()]
+        }
+        if ano not in data:
+            data[ano] = []
+        data[ano].append(novo_evento)
+        save_data(data)
+        st.success("Evento adicionado com sucesso!")
 
-/* Cores das Esferas */
-.sphere-red { 
-    background: radial-gradient(circle at 10px 10px, #FF5733, #C70039); /* Laranja-Vermelho */
-}
-.sphere-blue { 
-    background: radial-gradient(circle at 10px 10px, #00BFFF, #1E90FF); /* Azul Claro-Escuro */
-}
-.sphere-green { 
-    background: radial-gradient(circle at 10px 10px, #3CB371, #2E8B57); /* Verde Floresta */
-}
-.sphere-orange { 
-    background: radial-gradient(circle at 10px 10px, #FFD700, #FF8C00); /* Dourado-Laranja */
-}
+    # Integração com Gemini
+    st.subheader("Estudo com Gemini")
+    token = st.text_input("Token Gemini", type="password")
+    prompt = st.text_area("Digite seu estudo/prompt")
+    if st.button("Enviar ao Gemini") and token and prompt:
+        resposta = gemini_query(prompt, token)
+        st.markdown("### 📜 Resposta do Gemini")
+        st.write(resposta)
 
-/* --- Bolinha Menor (Linha Pontilhada) --- */
-.small-dot {
-    width: 4px; /* Menor e mais discreta */
-    height: 4px;
-    background-color: #6c757d; /* Cinza médio */
-    border-radius: 50%;
-    margin: 6px 0 6px 14px; /* Alinhamento com a nova esfera */
-}
-
-/* --- Container da Linha Pontilhada --- */
-.dot-line-container {
-    height: 150px; 
-    display: flex;
-    flex-direction: column;
-    justify-content: space-evenly; 
-    align-items: center;
-    padding-left: 15px; /* Alinha com a coluna */
-}
-
-/* Estilo para o Cartão de Evento (Conteúdo) */
-.event-card {
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 30px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15); /* Sombra forte para destacar */
-    border: 1px solid #333; /* Borda sutil para modo escuro */
-    background-color: #1e1e1e; /* Fundo levemente escuro (Ótimo em Streamlit Dark Mode) */
-    transition: all 0.3s ease-in-out;
-}
-
-/* Alinhamento Vertical: Container para envolver o Card e o Ponto */
-.event-wrapper {
-    display: flex;
-    align-items: center; /* Alinha o conteúdo verticalmente */
-    margin-bottom: 20px;
-}
-
-/* Cabeçalho do Cartão */
-.card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom:
+if __name__ == "__main__":
+    main()
