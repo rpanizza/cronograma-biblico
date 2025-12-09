@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 
 # --- Configurações Iniciais ---
-st.set_page_config(layout="wide", page_title="Cronograma Bíblico Responsivo com Ícones")
+st.set_page_config(layout="wide", page_title="Cronograma Bíblico Responsivo FIX")
 
-# --- CSS OTIMIZADO (COM ÍCONES) ---
+# --- CSS OTIMIZADO (CORREÇÃO MOBILE E FIDELIDADE VISUAL) ---
 TIMELINE_CSS = """
 <style>
 /* Estilo para a linha vertical */
@@ -23,11 +23,11 @@ TIMELINE_CSS = """
     border-radius: 50%;
     position: relative;
     top: -5px; 
-    left: -22px; 
+    left: -28px; /* Ajuste crucial para garantir que o ponto fique visível na nova coluna mais larga */
     box-shadow: 0 0 5px rgba(0, 0, 0, 0.2); 
     z-index: 10;
     
-    /* CENTRALIZAÇÃO DO ÍCONE */
+    /* Centralização do Ícone */
     display: flex;
     justify-content: center;
     align-items: center;
@@ -35,9 +35,9 @@ TIMELINE_CSS = """
 
 /* Pseudo-elemento para o ÍCONE dentro da bolinha */
 .timeline-point::after {
-    content: "✝️"; /* Ícone padrão (pode ser alterado para ⭐ ou 📜) */
-    font-size: 10px; /* Tamanho pequeno para caber */
-    line-height: 1; /* Garante que o ícone fique centralizado */
+    content: "✝️"; 
+    font-size: 10px; 
+    line-height: 1; 
 }
 
 /* Cores específicas para os pontos */
@@ -52,7 +52,8 @@ TIMELINE_CSS = """
     margin-bottom: 25px;
     box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.1);
     border-left: 5px solid; 
-    margin-left: -15px; 
+    /* Remove a margem negativa que puxava o card. Vamos confiar mais nas colunas. */
+    /* margin-left: -15px; */ 
     transition: all 0.3s ease-in-out;
 }
 
@@ -63,8 +64,8 @@ TIMELINE_CSS = """
 
 /* REGRAS DE RESPONSIVIDADE (MEDIA QUERIES) */
 @media (max-width: 600px) {
+    /* Mantém o card ajustado, a linha agora deve ser renderizada devido à nova proporção de coluna */
     .event-card {
-        margin-left: 0px; 
         padding: 10px; 
     }
 }
@@ -77,9 +78,7 @@ st.markdown(TIMELINE_CSS, unsafe_allow_html=True)
 
 # --- Função de Dados (Mantida a estrutura) ---
 def criar_dados_cronograma():
-    """Cria dados de exemplo com cores.
-    # OBSERVAÇÃO: PARA TESTAR SEM EVENTOS, RETORNE 'pd.DataFrame([])'
-    """
+    """Cria dados de exemplo com cores."""
     dados = [
         {
             "id_pai": "EP001", "data_pai": "2025 A.C.", "evento_pai": "O Dilúvio Universal",
@@ -91,7 +90,6 @@ def criar_dados_cronograma():
         },
     ]
     df_full = pd.DataFrame(dados)
-    # df_full = pd.DataFrame([]) # Descomente esta linha para testar o modo 'sem eventos'
     return df_full
 
 # --- Estrutura Principal do Layout ---
@@ -129,27 +127,23 @@ with st.sidebar:
 st.header("📖 Timeline do Cronograma Bíblico Profético")
 st.markdown("---")
 
-# Colunas para a Timeline: Coluna A (Ponto/Linha) | Coluna B (Conteúdo/Cartão)
-col_visual, col_content = st.columns([0.05, 0.95])
+# CORREÇÃO CRUCIAL: AUMENTAR A PROPORÇÃO DA COLUNA VISUAL PARA 0.1
+col_visual, col_content = st.columns([0.1, 0.9])
 
 
 ## Lógica de Renderização
 
 if eventos_pai.empty:
-    # Renderiza a estrutura da Timeline, mas com a mensagem de vazio
     with col_visual:
-        # Renderiza a linha vertical base
         st.markdown('<div class="timeline-line" style="height: 100px;"></div>', unsafe_allow_html=True)
         st.markdown('<div class="timeline-line" style="height: 100px;"></div>', unsafe_allow_html=True)
         
     with col_content:
         st.info("⚠️ Não há eventos registrados neste momento. Adicione o primeiro evento pelo Painel do Administrador.")
 else:
-    # Itera e renderiza os eventos existentes
     for index, pai in eventos_pai.iterrows():
         cor = pai['cor']
         
-        # Como não carregamos todos os sub-eventos na função de dados acima, vamos simplificar para a timeline principal
         sub_eventos_presentes = df_full[
             (df_full['id_pai'] == pai['id_pai']) &
             (df_full['id_sub'].notna())
@@ -157,10 +151,8 @@ else:
         
         # --- Coluna da Linha (Visual com Ícone) ---
         with col_visual:
-            # Ponto de destaque (O ÍCONE ✝️ é injetado via CSS no ::after do .timeline-point)
             st.markdown(f'<div class="timeline-point point-{cor}"></div>', unsafe_allow_html=True)
             
-            # A linha de conexão, exceto o último item
             if index < len(eventos_pai) - 1:
                 st.markdown('<div class="timeline-line" style="height: 150px;"></div>', unsafe_allow_html=True)
             else:
@@ -170,12 +162,10 @@ else:
         with col_content:
             st.markdown(f'<div class="event-card card-{cor}">', unsafe_allow_html=True)
             
-            # Data e Título
             st.markdown(f'<div class="event-date">{pai["data_pai"]}</div>', unsafe_allow_html=True)
             st.markdown(f"### **{pai['evento_pai']}**") 
             st.markdown(f"**ID:** `{pai['id_pai']}` | *(Ref: {pai['referencia']})*")
             
-            # Expansor para Sub-eventos (usando a presença de sub-eventos simulados)
             if not sub_eventos_presentes.empty:
                 with st.expander(f"➕ Mostrar detalhes e sub-eventos"):
                     for sub_index, sub in sub_eventos_presentes.iterrows():
