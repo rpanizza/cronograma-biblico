@@ -1,5 +1,5 @@
 import streamlit as st
-import json
+import sqlite3
 import uuid
 import requests
 
@@ -8,18 +8,73 @@ import requests
 # ==============================
 st.set_page_config(page_title="Estudo Bíblico Profético", layout="wide")
 
-# Função para carregar dados
-def load_data():
-    try:
-        with open("data.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
+# ==============================
+# BANCO DE DADOS
+# ==============================
+def init_db():
+    conn = sqlite3.connect("timeline.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS eventos (
+            id TEXT PRIMARY KEY,
+            ano TEXT,
+            titulo TEXT,
+            descricao TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS profecias (
+            id TEXT PRIMARY KEY,
+            evento_id TEXT,
+            texto TEXT,
+            FOREIGN KEY(evento_id) REFERENCES eventos(id)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS analises (
+            id TEXT PRIMARY KEY,
+            evento_id TEXT,
+            texto TEXT,
+            FOREIGN KEY(evento_id) REFERENCES eventos(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-# Função para salvar dados
-def save_data(data):
-    with open("data.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+def add_evento(ano, titulo, descricao, profecias, analises):
+    conn = sqlite3.connect("timeline.db")
+    c = conn.cursor()
+    evento_id = str(uuid.uuid4())
+    c.execute("INSERT INTO eventos VALUES (?, ?, ?, ?)", (evento_id, ano, titulo, descricao))
+    for p in profecias:
+        c.execute("INSERT INTO profecias VALUES (?, ?, ?)", (str(uuid.uuid4()), evento_id, p))
+    for a in analises:
+        c.execute("INSERT INTO analises VALUES (?, ?, ?)", (str(uuid.uuid4()), evento_id, a))
+    conn.commit()
+    conn.close()
+
+def get_eventos():
+    conn = sqlite3.connect("timeline.db")
+    c = conn.cursor()
+    c.execute("SELECT * FROM eventos ORDER BY ano")
+    eventos = c.fetchall()
+    result = []
+    for e in eventos:
+        evento_id, ano, titulo, descricao = e
+        c.execute("SELECT texto FROM profecias WHERE evento_id=?", (evento_id,))
+        profecias = [row[0] for row in c.fetchall()]
+        c.execute("SELECT texto FROM analises WHERE evento_id=?", (evento_id,))
+        analises = [row[0] for row in c.fetchall()]
+        result.append({
+            "id": evento_id,
+            "ano": ano,
+            "titulo": titulo,
+            "descricao": descricao,
+            "profecias": profecias,
+            "analises": analises
+        })
+    conn.close()
+    return result
 
 # ==============================
 # LOGIN
@@ -29,7 +84,7 @@ def login():
     user = st.sidebar.text_input("Usuário")
     password = st.sidebar.text_input("Senha", type="password")
     if st.sidebar.button("Entrar"):
-        if user == "admin" and password == "1234":  # exemplo simples
+        if user == "admin" and password == "1234":
             st.session_state["auth"] = True
         else:
             st.sidebar.error("Usuário ou senha inválidos")
@@ -40,9 +95,7 @@ def login():
 def gemini_query(prompt, token):
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
     headers = {"Authorization": f"Bearer {token}"}
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}]
-    }
+    body = {"contents": [{"parts": [{"text": prompt}]}]}
     response = requests.post(url, headers=headers, json=body)
     if response.status_code == 200:
         return response.json()["candidates"][0]["content"]["parts"][0]["text"]
@@ -53,6 +106,8 @@ def gemini_query(prompt, token):
 # INTERFACE PRINCIPAL
 # ==============================
 def main():
+    init_db()
+
     if "auth" not in st.session_state:
         st.session_state["auth"] = False
 
@@ -61,20 +116,19 @@ def main():
         return
 
     st.title("📖 Estudo Bíblico Profético")
-    data = load_data()
 
     # Timeline
     st.subheader("Timeline Profética")
-    for ano, eventos in sorted(data.items()):
-        st.markdown(f"### 📅 {ano}")
-        for evento in eventos:
-            st.markdown(f"- **Evento:** {evento['titulo']} (ID: {evento['id']})")
-            if "descricao" in evento:
-                st.write(f"Descrição: {evento['descricao']}")
-            if "profecias" in evento:
-                st.write(f"Profecias: {', '.join(evento['profecias'])}")
-            if "analises" in evento:
-                st.write(f"Análises: {', '.join(evento['analises'])}")
+    eventos = get_eventos()
+    for e in eventos:
+        st.markdown(f"### 📅 {e['ano']}")
+        st.markdown(f"- **Evento:** {e['titulo']} (ID: {e['id']})")
+        if e["descricao"]:
+            st.write(f"Descrição: {e['descricao']}")
+        if e["profecias"]:
+            st.write(f"Profecias: {', '.join(e['profecias'])}")
+        if e["analises"]:
+            st.write(f"Análises: {', '.join(e['analises'])}")
 
     # Área de administração
     st.subheader("Gerenciar Cronograma")
@@ -85,17 +139,13 @@ def main():
     analises = st.text_area("Análises (separadas por vírgula)")
 
     if st.button("Adicionar Evento"):
-        novo_evento = {
-            "id": str(uuid.uuid4()),
-            "titulo": titulo,
-            "descricao": descricao,
-            "profecias": [p.strip() for p in profecias.split(",") if p.strip()],
-            "analises": [a.strip() for a in analises.split(",") if a.strip()]
-        }
-        if ano not in data:
-            data[ano] = []
-        data[ano].append(novo_evento)
-        save_data(data)
+        add_evento(
+            ano,
+            titulo,
+            descricao,
+            [p.strip() for p in profecias.split(",") if p.strip()],
+            [a.strip() for a in analises.split(",") if a.strip()]
+        )
         st.success("Evento adicionado com sucesso!")
 
     # Integração com Gemini
