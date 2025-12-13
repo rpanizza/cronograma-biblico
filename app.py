@@ -5,9 +5,9 @@ from datetime import datetime
 import streamlit as st
 import plotly.graph_objects as go
 
-# LibSQL/Turso (SQLite online)
+# SQLiteCloud (SQLite online síncrono)
 try:
-    from libsql_client import create_client
+    import sqlitecloud
     DB_AVAILABLE = True
 except Exception:
     DB_AVAILABLE = False
@@ -22,7 +22,7 @@ except Exception:
 
 APP_TITLE = "Estudo Bíblico — Linha do Tempo Circular"
 ADMIN_USER = "admin"
-ADMIN_PASS = "R$Masterkey01"  # Em produção, usar hash + secrets
+ADMIN_PASS = "R$Masterkey01"
 SCHEMA_VERSION = "v1"
 
 
@@ -43,34 +43,56 @@ def safe_int(val, default=None):
 
 
 # ---------------------------
-# DB: Turso/libSQL client
+# DB: SQLiteCloud client
 # ---------------------------
-def get_client():
+def get_conn():
     if not DB_AVAILABLE:
-        raise RuntimeError("Biblioteca libsql-client não está instalada.")
-    db_url = st.secrets.get("TURSO_DATABASE_URL", "")
-    db_token = st.secrets.get("TURSO_AUTH_TOKEN", "")
-    if not db_url or not db_token:
-        raise RuntimeError("Configure TURSO_DATABASE_URL e TURSO_AUTH_TOKEN em st.secrets.")
-    return create_client(url=db_url, auth_token=db_token)
+        raise RuntimeError("Biblioteca sqlitecloud não está instalada.")
+    db_url = st.secrets.get("SQLITECLOUD_URL", "")
+    # Exemplo de URL: sqlitecloud://usuario:senha@host:port/database
+    # Você pode usar também SQLITECLOUD_HOST, SQLITECLOUD_USER, SQLITECLOUD_PASS, SQLITECLOUD_DB separadamente
+    if not db_url:
+        # alternativa por partes
+        host = st.secrets.get("SQLITECLOUD_HOST", "")
+        user = st.secrets.get("SQLITECLOUD_USER", "")
+        password = st.secrets.get("SQLITECLOUD_PASS", "")
+        database = st.secrets.get("SQLITECLOUD_DB", "")
+        port = st.secrets.get("SQLITECLOUD_PORT", 8860)  # porta padrão
+        if not (host and user and password and database):
+            raise RuntimeError("Configure SQLITECLOUD_URL ou (SQLITECLOUD_HOST, USER, PASS, DB) em st.secrets.")
+        conn = sqlitecloud.connect(
+            host=host,
+            port=int(port),
+            username=user,
+            password=password,
+            database=database,
+            secure=True,
+        )
+        return conn
+    # Conexão direta via URL
+    conn = sqlitecloud.connect(db_url)
+    return conn
 
-def exec_sql(sql: str, params: tuple = ()):
-    client = get_client()
+def exec_sql(sql: str, params: tuple = (), fetch: bool = False):
+    conn = get_conn()
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    if loop.is_running():
-        # Se já houver loop ativo (caso raro), cria tarefa
-        future = asyncio.ensure_future(client.execute(sql, params))
-        return loop.run_until_complete(future)
-    else:
-        return loop.run_until_complete(client.execute(sql, params))
-
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        if fetch:
+            rows = cur.fetchall()
+            # sqlitecloud retorna tuplas e cursor.description com colunas
+            cols = [d[0] for d in cur.description] if cur.description else []
+            if cols:
+                return [dict(zip(cols, r)) for r in rows]
+            return rows
+        else:
+            conn.commit()
+            return True
+    finally:
+        conn.close()
 
 def init_db():
+    # meta
     exec_sql("""
         CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,
@@ -81,6 +103,7 @@ def init_db():
         INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?);
     """, (SCHEMA_VERSION,))
 
+    # years
     exec_sql("""
     CREATE TABLE IF NOT EXISTS years (
         id TEXT PRIMARY KEY,
@@ -88,6 +111,7 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
+    # events
     exec_sql("""
     CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -100,6 +124,7 @@ def init_db():
         FOREIGN KEY (year_id) REFERENCES years (id) ON DELETE CASCADE
     );
     """)
+    # subevents
     exec_sql("""
     CREATE TABLE IF NOT EXISTS subevents (
         id TEXT PRIMARY KEY,
@@ -112,6 +137,7 @@ def init_db():
         FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     """)
+    # descriptions
     exec_sql("""
     CREATE TABLE IF NOT EXISTS descriptions (
         id TEXT PRIMARY KEY,
@@ -121,6 +147,7 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
+    # prophecies
     exec_sql("""
     CREATE TABLE IF NOT EXISTS prophecies (
         id TEXT PRIMARY KEY,
@@ -131,6 +158,7 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
+    # analyses
     exec_sql("""
     CREATE TABLE IF NOT EXISTS analyses (
         id TEXT PRIMARY KEY,
@@ -157,8 +185,8 @@ def add_year(year: int):
     return yid
 
 def get_years():
-    res = exec_sql("SELECT id, year FROM years ORDER BY year ASC;")
-    return [{"id": r["id"], "year": r["year"]} for r in res.rows]
+    rows = exec_sql("SELECT id, year FROM years ORDER BY year ASC;", fetch=True)
+    return [{"id": r["id"], "year": r["year"]} for r in rows]
 
 def add_event(year_id: str, title: str, summary: str = None, start_date: str = None, end_date: str = None):
     eid = new_id()
@@ -169,12 +197,12 @@ def add_event(year_id: str, title: str, summary: str = None, start_date: str = N
     return eid
 
 def get_events_by_year(year_id: str):
-    res = exec_sql("""
+    rows = exec_sql("""
         SELECT id, title, summary, start_date, end_date
         FROM events WHERE year_id = ?
         ORDER BY created_at ASC;
-    """, (year_id,))
-    return [{"id": r["id"], "title": r["title"], "summary": r["summary"], "start_date": r["start_date"], "end_date": r["end_date"]} for r in res.rows]
+    """, (year_id,), fetch=True)
+    return [{"id": r["id"], "title": r["title"], "summary": r["summary"], "start_date": r["start_date"], "end_date": r["end_date"]} for r in rows]
 
 def add_subevent(event_id: str, title: str, summary: str = None, start_date: str = None, end_date: str = None):
     sid = new_id()
@@ -185,12 +213,12 @@ def add_subevent(event_id: str, title: str, summary: str = None, start_date: str
     return sid
 
 def get_subevents(event_id: str):
-    res = exec_sql("""
+    rows = exec_sql("""
         SELECT id, title, summary, start_date, end_date
         FROM subevents WHERE event_id = ?
         ORDER BY created_at ASC;
-    """, (event_id,))
-    return [{"id": r["id"], "title": r["title"], "summary": r["summary"], "start_date": r["start_date"], "end_date": r["end_date"]} for r in res.rows]
+    """, (event_id,), fetch=True)
+    return [{"id": r["id"], "title": r["title"], "summary": r["summary"], "start_date": r["start_date"], "end_date": r["end_date"]} for r in rows]
 
 def add_description(parent_type: str, parent_id: str, text: str):
     did = new_id()
@@ -201,12 +229,12 @@ def add_description(parent_type: str, parent_id: str, text: str):
     return did
 
 def get_descriptions(parent_type: str, parent_id: str):
-    res = exec_sql("""
+    rows = exec_sql("""
         SELECT id, text FROM descriptions
         WHERE parent_type = ? AND parent_id = ?
         ORDER BY created_at ASC;
-    """, (parent_type, parent_id))
-    return [{"id": r["id"], "text": r["text"]} for r in res.rows]
+    """, (parent_type, parent_id), fetch=True)
+    return [{"id": r["id"], "text": r["text"]} for r in rows]
 
 def add_prophecy(parent_type: str, parent_id: str, reference: str, text: str):
     pid = new_id()
@@ -217,12 +245,12 @@ def add_prophecy(parent_type: str, parent_id: str, reference: str, text: str):
     return pid
 
 def get_prophecies(parent_type: str, parent_id: str):
-    res = exec_sql("""
+    rows = exec_sql("""
         SELECT id, reference, text FROM prophecies
         WHERE parent_type = ? AND parent_id = ?
         ORDER BY created_at ASC;
-    """, (parent_type, parent_id))
-    return [{"id": r["id"], "reference": r["reference"], "text": r["text"]} for r in res.rows]
+    """, (parent_type, parent_id), fetch=True)
+    return [{"id": r["id"], "reference": r["reference"], "text": r["text"]} for r in rows]
 
 def add_analysis(parent_type: str, parent_id: str, text: str):
     aid = new_id()
@@ -233,12 +261,12 @@ def add_analysis(parent_type: str, parent_id: str, text: str):
     return aid
 
 def get_analyses(parent_type: str, parent_id: str):
-    res = exec_sql("""
+    rows = exec_sql("""
         SELECT id, text FROM analyses
         WHERE parent_type = ? AND parent_id = ?
         ORDER BY created_at ASC;
-    """, (parent_type, parent_id))
-    return [{"id": r["id"], "text": r["text"]} for r in res.rows]
+    """, (parent_type, parent_id), fetch=True)
+    return [{"id": r["id"], "text": r["text"]} for r in rows]
 
 
 # ---------------------------
@@ -315,7 +343,6 @@ def render_circular_timeline(years):
         return
 
     n = len(years)
-    # ângulos 0..180 graus para criar uma curva ascendente
     angles = [i * (180 / max(n - 1, 1)) for i in range(n)]
     radius = 1.0
     xs = [radius * -1 * math.cos(math.radians(a)) for a in angles]
@@ -580,7 +607,7 @@ def main():
     try:
         init_db()
     except Exception as e:
-        st.error(f"Falha ao inicializar banco (libSQL/Turso): {e}")
+        st.error(f"Falha ao inicializar banco (SQLiteCloud): {e}")
         st.stop()
 
     st.title(APP_TITLE)
