@@ -54,8 +54,6 @@ def get_client():
         raise RuntimeError("Configure TURSO_DATABASE_URL e TURSO_AUTH_TOKEN em st.secrets.")
     return create_client(url=db_url, auth_token=db_token)
 
-import asyncio
-
 def exec_sql(sql: str, params: tuple = ()):
     client = get_client()
     try:
@@ -65,14 +63,14 @@ def exec_sql(sql: str, params: tuple = ()):
         asyncio.set_event_loop(loop)
 
     if loop.is_running():
-        # Se já estiver rodando (ex: Streamlit async), use create_task
-        task = loop.create_task(client.execute(sql, params))
-        return asyncio.run(task)
+        # Se já houver loop ativo (caso raro), cria tarefa
+        future = asyncio.ensure_future(client.execute(sql, params))
+        return loop.run_until_complete(future)
     else:
         return loop.run_until_complete(client.execute(sql, params))
 
+
 def init_db():
-    # schema version
     exec_sql("""
         CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,
@@ -83,7 +81,6 @@ def init_db():
         INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?);
     """, (SCHEMA_VERSION,))
 
-    # years
     exec_sql("""
     CREATE TABLE IF NOT EXISTS years (
         id TEXT PRIMARY KEY,
@@ -91,7 +88,6 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
-    # events
     exec_sql("""
     CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
@@ -104,7 +100,6 @@ def init_db():
         FOREIGN KEY (year_id) REFERENCES years (id) ON DELETE CASCADE
     );
     """)
-    # subevents
     exec_sql("""
     CREATE TABLE IF NOT EXISTS subevents (
         id TEXT PRIMARY KEY,
@@ -117,7 +112,6 @@ def init_db():
         FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     """)
-    # descriptions
     exec_sql("""
     CREATE TABLE IF NOT EXISTS descriptions (
         id TEXT PRIMARY KEY,
@@ -127,7 +121,6 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
-    # prophecies
     exec_sql("""
     CREATE TABLE IF NOT EXISTS prophecies (
         id TEXT PRIMARY KEY,
@@ -138,7 +131,6 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
-    # analyses
     exec_sql("""
     CREATE TABLE IF NOT EXISTS analyses (
         id TEXT PRIMARY KEY,
