@@ -1,28 +1,33 @@
-import os
 import uuid
-import sqlite3
+import math
 from datetime import datetime
+
 import streamlit as st
 import plotly.graph_objects as go
-from dotenv import load_dotenv
 
-# Optional Gemini integration (Google Generative AI)
+# LibSQL/Turso (SQLite online)
+try:
+    from libsql_client import create_client
+    DB_AVAILABLE = True
+except Exception:
+    DB_AVAILABLE = False
+
+# Gemini
 try:
     import google.generativeai as genai
     GEMINI_AVAILABLE = True
 except Exception:
     GEMINI_AVAILABLE = False
 
-# ---------------------------
-# Configuration and constants
-# ---------------------------
-DB_PATH = "biblestudy.db"
+
 APP_TITLE = "Estudo Bíblico — Linha do Tempo Circular"
 ADMIN_USER = "admin"
-ADMIN_PASS = "R$Masterkey01"  # SUGESTÃO: troque para variável de ambiente e hash em produção
+ADMIN_PASS = "R$Masterkey01"  # Em produção, usar hash + secrets
+SCHEMA_VERSION = "v1"
+
 
 # ---------------------------
-# Helpers: IDs and utilities
+# Helpers
 # ---------------------------
 def new_id() -> str:
     return str(uuid.uuid4())
@@ -36,29 +41,45 @@ def safe_int(val, default=None):
     except Exception:
         return default
 
+
 # ---------------------------
-# SQLite: initialization and CRUD
+# DB: Turso/libSQL client
 # ---------------------------
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = 1;")
-    return conn
+def get_client():
+    if not DB_AVAILABLE:
+        raise RuntimeError("Biblioteca libsql-client não está instalada.")
+    db_url = st.secrets.get("TURSO_DATABASE_URL", "")
+    db_token = st.secrets.get("TURSO_AUTH_TOKEN", "")
+    if not db_url or not db_token:
+        raise RuntimeError("Configure TURSO_DATABASE_URL e TURSO_AUTH_TOKEN em st.secrets.")
+    return create_client(url=db_url, auth_token=db_token)
+
+def exec_sql(sql: str, params: tuple = ()):
+    client = get_client()
+    return client.execute(sql, params)
 
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
+    # schema version
+    exec_sql("""
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+    """)
+    exec_sql("""
+        INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?);
+    """, (SCHEMA_VERSION,))
 
-    # Years
-    cur.execute("""
+    # years
+    exec_sql("""
     CREATE TABLE IF NOT EXISTS years (
         id TEXT PRIMARY KEY,
         year INTEGER UNIQUE NOT NULL,
         created_at TEXT NOT NULL
     );
     """)
-
-    # Events
-    cur.execute("""
+    # events
+    exec_sql("""
     CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         year_id TEXT NOT NULL,
@@ -70,9 +91,8 @@ def init_db():
         FOREIGN KEY (year_id) REFERENCES years (id) ON DELETE CASCADE
     );
     """)
-
-    # Sub-events
-    cur.execute("""
+    # subevents
+    exec_sql("""
     CREATE TABLE IF NOT EXISTS subevents (
         id TEXT PRIMARY KEY,
         event_id TEXT NOT NULL,
@@ -84,9 +104,8 @@ def init_db():
         FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
     """)
-
-    # Descriptions
-    cur.execute("""
+    # descriptions
+    exec_sql("""
     CREATE TABLE IF NOT EXISTS descriptions (
         id TEXT PRIMARY KEY,
         parent_type TEXT NOT NULL CHECK (parent_type IN ('event','subevent')),
@@ -95,21 +114,19 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
-
-    # Prophecies
-    cur.execute("""
+    # prophecies
+    exec_sql("""
     CREATE TABLE IF NOT EXISTS prophecies (
         id TEXT PRIMARY KEY,
         parent_type TEXT NOT NULL CHECK (parent_type IN ('event','subevent')),
         parent_id TEXT NOT NULL,
-        reference TEXT,  -- Ex: "Daniel 9:24-27"
+        reference TEXT,
         text TEXT NOT NULL,
         created_at TEXT NOT NULL
     );
     """)
-
-    # Analyses
-    cur.execute("""
+    # analyses
+    exec_sql("""
     CREATE TABLE IF NOT EXISTS analyses (
         id TEXT PRIMARY KEY,
         parent_type TEXT NOT NULL CHECK (parent_type IN ('event','subevent')),
@@ -118,160 +135,112 @@ def init_db():
         created_at TEXT NOT NULL
     );
     """)
+    # índices
+    exec_sql("CREATE INDEX IF NOT EXISTS idx_events_year ON events(year_id);")
+    exec_sql("CREATE INDEX IF NOT EXISTS idx_subevents_event ON subevents(event_id);")
+    exec_sql("CREATE INDEX IF NOT EXISTS idx_desc_parent ON descriptions(parent_id, parent_type);")
+    exec_sql("CREATE INDEX IF NOT EXISTS idx_prop_parent ON prophecies(parent_id, parent_type);")
+    exec_sql("CREATE INDEX IF NOT EXISTS idx_analy_parent ON analyses(parent_id, parent_type);")
 
-    # Indexes for performance
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_events_year ON events(year_id);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_subevents_event ON subevents(event_id);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_desc_parent ON descriptions(parent_id, parent_type);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_prop_parent ON prophecies(parent_id, parent_type);")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_analy_parent ON analyses(parent_id, parent_type);")
 
-    conn.commit()
-    conn.close()
-
+# ---------------------------
+# CRUD
+# ---------------------------
 def add_year(year: int):
-    conn = get_conn()
-    cur = conn.cursor()
     yid = new_id()
-    cur.execute("INSERT INTO years (id, year, created_at) VALUES (?, ?, ?);", (yid, year, now_iso()))
-    conn.commit()
-    conn.close()
+    exec_sql("INSERT INTO years (id, year, created_at) VALUES (?, ?, ?);", (yid, year, now_iso()))
     return yid
 
 def get_years():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT id, year FROM years ORDER BY year ASC;")
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": r[0], "year": r[1]} for r in rows]
+    res = exec_sql("SELECT id, year FROM years ORDER BY year ASC;")
+    return [{"id": r["id"], "year": r["year"]} for r in res.rows]
 
 def add_event(year_id: str, title: str, summary: str = None, start_date: str = None, end_date: str = None):
-    conn = get_conn()
-    cur = conn.cursor()
     eid = new_id()
-    cur.execute("""
+    exec_sql("""
         INSERT INTO events (id, year_id, title, summary, start_date, end_date, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?);
     """, (eid, year_id, title, summary, start_date, end_date, now_iso()))
-    conn.commit()
-    conn.close()
     return eid
 
 def get_events_by_year(year_id: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
+    res = exec_sql("""
         SELECT id, title, summary, start_date, end_date
         FROM events WHERE year_id = ?
         ORDER BY created_at ASC;
     """, (year_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": r[0], "title": r[1], "summary": r[2], "start_date": r[3], "end_date": r[4]} for r in rows]
+    return [{"id": r["id"], "title": r["title"], "summary": r["summary"], "start_date": r["start_date"], "end_date": r["end_date"]} for r in res.rows]
 
 def add_subevent(event_id: str, title: str, summary: str = None, start_date: str = None, end_date: str = None):
-    conn = get_conn()
-    cur = conn.cursor()
     sid = new_id()
-    cur.execute("""
+    exec_sql("""
         INSERT INTO subevents (id, event_id, title, summary, start_date, end_date, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?);
     """, (sid, event_id, title, summary, start_date, end_date, now_iso()))
-    conn.commit()
-    conn.close()
     return sid
 
 def get_subevents(event_id: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
+    res = exec_sql("""
         SELECT id, title, summary, start_date, end_date
         FROM subevents WHERE event_id = ?
         ORDER BY created_at ASC;
     """, (event_id,))
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": r[0], "title": r[1], "summary": r[2], "start_date": r[3], "end_date": r[4]} for r in rows]
+    return [{"id": r["id"], "title": r["title"], "summary": r["summary"], "start_date": r["start_date"], "end_date": r["end_date"]} for r in res.rows]
 
 def add_description(parent_type: str, parent_id: str, text: str):
-    conn = get_conn()
-    cur = conn.cursor()
     did = new_id()
-    cur.execute("""
+    exec_sql("""
         INSERT INTO descriptions (id, parent_type, parent_id, text, created_at)
         VALUES (?, ?, ?, ?, ?);
     """, (did, parent_type, parent_id, text, now_iso()))
-    conn.commit()
-    conn.close()
     return did
 
 def get_descriptions(parent_type: str, parent_id: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
+    res = exec_sql("""
         SELECT id, text FROM descriptions
         WHERE parent_type = ? AND parent_id = ?
         ORDER BY created_at ASC;
     """, (parent_type, parent_id))
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": r[0], "text": r[1]} for r in rows]
+    return [{"id": r["id"], "text": r["text"]} for r in res.rows]
 
 def add_prophecy(parent_type: str, parent_id: str, reference: str, text: str):
-    conn = get_conn()
-    cur = conn.cursor()
     pid = new_id()
-    cur.execute("""
+    exec_sql("""
         INSERT INTO prophecies (id, parent_type, parent_id, reference, text, created_at)
         VALUES (?, ?, ?, ?, ?, ?);
     """, (pid, parent_type, parent_id, reference, text, now_iso()))
-    conn.commit()
-    conn.close()
     return pid
 
 def get_prophecies(parent_type: str, parent_id: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
+    res = exec_sql("""
         SELECT id, reference, text FROM prophecies
         WHERE parent_type = ? AND parent_id = ?
         ORDER BY created_at ASC;
     """, (parent_type, parent_id))
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": r[0], "reference": r[1], "text": r[2]} for r in rows]
+    return [{"id": r["id"], "reference": r["reference"], "text": r["text"]} for r in res.rows]
 
 def add_analysis(parent_type: str, parent_id: str, text: str):
-    conn = get_conn()
-    cur = conn.cursor()
     aid = new_id()
-    cur.execute("""
+    exec_sql("""
         INSERT INTO analyses (id, parent_type, parent_id, text, created_at)
         VALUES (?, ?, ?, ?, ?);
     """, (aid, parent_type, parent_id, text, now_iso()))
-    conn.commit()
-    conn.close()
     return aid
 
 def get_analyses(parent_type: str, parent_id: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
+    res = exec_sql("""
         SELECT id, text FROM analyses
         WHERE parent_type = ? AND parent_id = ?
         ORDER BY created_at ASC;
     """, (parent_type, parent_id))
-    rows = cur.fetchall()
-    conn.close()
-    return [{"id": r[0], "text": r[1]} for r in rows]
+    return [{"id": r["id"], "text": r["text"]} for r in res.rows]
+
 
 # ---------------------------
-# Gemini: setup and prompt
+# Gemini
 # ---------------------------
 def setup_gemini():
-    load_dotenv()
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = st.secrets.get("GOOGLE_API_KEY", "")
     if GEMINI_AVAILABLE and api_key:
         genai.configure(api_key=api_key)
         return True
@@ -279,31 +248,28 @@ def setup_gemini():
 
 def call_gemini(prompt: str, context: dict = None, model_name: str = "gemini-1.5-flash"):
     if not GEMINI_AVAILABLE:
-        return "Gemini SDK não está disponível. Verifique se 'google-generativeai' está instalado."
+        return "Gemini SDK não está disponível (instale google-generativeai)."
     if not setup_gemini():
-        return "Chave de API do Gemini ausente. Configure GOOGLE_API_KEY no ambiente."
+        return "Chave de API do Gemini ausente em st.secrets (GOOGLE_API_KEY)."
     try:
         system_context = ""
         if context:
-            # Build a compact, structured context string
             system_context = f"""Contexto do estudo:
 - Ano: {context.get('year')}
 - Evento: {context.get('event_title')}
 - Evento ID: {context.get('event_id')}
 - Sub-evento: {context.get('subevent_title')}
 - Sub-evento ID: {context.get('subevent_id')}
-
-Referências e notas:
 - Resumo: {context.get('summary') or '-'}
 - Datas: início={context.get('start_date') or '-'}, fim={context.get('end_date') or '-'}
 """
-
         full_prompt = f"{system_context}\n\nPergunta/Estudo:\n{prompt}"
         model = genai.GenerativeModel(model_name)
         resp = model.generate_content(full_prompt)
         return resp.text or "Sem conteúdo retornado."
     except Exception as e:
         return f"Erro ao usar Gemini: {e}"
+
 
 # ---------------------------
 # UI: Session and login
@@ -334,22 +300,22 @@ def logoff():
     st.session_state.admin_pw = ""
     st.session_state.login_msg = "Sessão encerrada."
 
+
 # ---------------------------
-# UI: Plot circular timeline
+# UI: Circular timeline
 # ---------------------------
 def render_circular_timeline(years):
     if not years:
         st.info("Nenhum ano cadastrado ainda.")
         return
 
-    # Arrange points along a semicircle
     n = len(years)
-    angles = [i * (180 / max(n - 1, 1)) for i in range(n)]  # 0..180 degrees
-    radius = 1
-    xs = [radius * -1 * (st.math.cos(a * 3.14159265 / 180)) for a in angles]  # left to right curve
-    ys = [radius * (st.math.sin(a * 3.14159265 / 180)) for a in angles]
+    # ângulos 0..180 graus para criar uma curva ascendente
+    angles = [i * (180 / max(n - 1, 1)) for i in range(n)]
+    radius = 1.0
+    xs = [radius * -1 * math.cos(math.radians(a)) for a in angles]
+    ys = [radius * math.sin(math.radians(a)) for a in angles]
 
-    # Plot
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=xs, y=ys,
@@ -367,12 +333,13 @@ def render_circular_timeline(years):
         margin=dict(l=10, r=10, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        height=220,
+        height=240,
     )
     st.plotly_chart(fig, use_container_width=True)
 
+
 # ---------------------------
-# UI: Timeline details
+# UI: Year details
 # ---------------------------
 def render_year_details(year):
     events = get_events_by_year(year["id"])
@@ -384,7 +351,6 @@ def render_year_details(year):
                 st.markdown(f"**Resumo:** {ev['summary']}")
             st.markdown(f"**Datas:** início: {ev['start_date'] or '-'} | fim: {ev['end_date'] or '-'}")
 
-            # Nested details
             subevents = get_subevents(ev["id"])
             if subevents:
                 st.markdown("**Sub-eventos:**")
@@ -393,7 +359,7 @@ def render_year_details(year):
                     if se["summary"]:
                         st.markdown(f"  - {se['summary']}")
                     st.markdown(f"  - Datas: início: {se['start_date'] or '-'} | fim: {se['end_date'] or '-'}")
-                    # Sub-event content
+
                     descs = get_descriptions("subevent", se["id"])
                     props = get_prophecies("subevent", se["id"])
                     anals = get_analyses("subevent", se["id"])
@@ -410,7 +376,6 @@ def render_year_details(year):
                         for a in anals:
                             st.markdown(f"    - `{a['id']}` — {a['text']}")
 
-            # Event content
             ev_descs = get_descriptions("event", ev["id"])
             ev_props = get_prophecies("event", ev["id"])
             ev_anals = get_analyses("event", ev["id"])
@@ -429,8 +394,9 @@ def render_year_details(year):
                 for a in ev_anals:
                     st.markdown(f"- `{a['id']}` — {a['text']}")
 
+
 # ---------------------------
-# UI: Admin forms
+# UI: Admin panel
 # ---------------------------
 def admin_panel():
     st.subheader("Área do administrador")
@@ -480,7 +446,6 @@ def admin_panel():
     # Add sub-event
     st.markdown("#### Adicionar sub-evento")
     if years:
-        # Build event selection map
         evs_map = {}
         for y in years:
             evs = get_events_by_year(y["id"])
@@ -518,18 +483,24 @@ def admin_panel():
     content_text = st.text_area("Texto")
     if st.button("Salvar conteúdo"):
         try:
-            if content_kind == "Descrição":
-                cid = add_description(target_type, target_id.strip(), content_text.strip())
-            elif content_kind == "Profecia":
-                cid = add_prophecy(target_type, target_id.strip(), ref.strip() if ref else None, content_text.strip())
+            if not target_id.strip():
+                st.error("Forneça um ID de alvo válido.")
+            elif not content_text.strip():
+                st.error("Texto é obrigatório.")
             else:
-                cid = add_analysis(target_type, target_id.strip(), content_text.strip())
-            st.success(f"Conteúdo salvo. ID: {cid}")
+                if content_kind == "Descrição":
+                    cid = add_description(target_type, target_id.strip(), content_text.strip())
+                elif content_kind == "Profecia":
+                    cid = add_prophecy(target_type, target_id.strip(), ref.strip() if ref else None, content_text.strip())
+                else:
+                    cid = add_analysis(target_type, target_id.strip(), content_text.strip())
+                st.success(f"Conteúdo salvo. ID: {cid}")
         except Exception as e:
             st.error(f"Erro ao salvar conteúdo: {e}")
 
+
 # ---------------------------
-# UI: Gemini study section
+# UI: Gemini study
 # ---------------------------
 def gemini_study_section():
     st.subheader("Estudo com Gemini (via prompt)")
@@ -581,30 +552,35 @@ def gemini_study_section():
         st.markdown("#### Resposta do Gemini")
         st.write(answer)
 
+
 # ---------------------------
-# Main app
+# Main
 # ---------------------------
 def main():
     st.set_page_config(page_title=APP_TITLE, page_icon="📜", layout="wide")
     ensure_session()
-    init_db()
 
     # Sidebar login
     with st.sidebar:
         st.header("Login do administrador")
         st.text_input("Usuário", key="admin_user", placeholder="admin")
-        # Validate on Enter (on_change fires on Enter or focus change)
         st.text_input("Senha", key="admin_pw", type="password", placeholder="Digite e pressione Enter", on_change=validate_login)
         if st.session_state.login_msg:
             st.caption(st.session_state.login_msg)
 
         st.markdown("---")
-        st.caption("Dica: pressione Enter na senha para validar sem clicar no botão.")
+        st.caption("Pressione Enter na senha para validar sem clicar no botão.")
+
+    # Init DB (online)
+    try:
+        init_db()
+    except Exception as e:
+        st.error(f"Falha ao inicializar banco (libSQL/Turso): {e}")
+        st.stop()
 
     st.title(APP_TITLE)
-    st.caption("Timeline circular com expansão de eventos, conteúdo detalhado e integração com Gemini.")
+    st.caption("Timeline circular com expansão de eventos, conteúdo detalhado e integração com Gemini (rodando 100% online).")
 
-    # Timeline
     years = get_years()
     render_circular_timeline(years)
 
@@ -620,6 +596,7 @@ def main():
         admin_panel()
     else:
         st.info("Faça login para acessar a área do administrador.")
+
 
 if __name__ == "__main__":
     main()
